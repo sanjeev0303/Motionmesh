@@ -1,0 +1,30 @@
+# Tasks
+
+- [x] Phase 0 — Repo skeleton & local dev loop
+  - [x] Create directory tree
+  - [x] Create go.work, go.work.sum
+  - [x] Create docker-compose.yml
+  - [x] Create root Makefile
+  - [x] Create .env.example
+  - [x] Create .gitignore and .editorconfig
+  - [x] Create server/api with stub main.go and go.mod
+  - [x] Create server/worker with stub main.go and go.mod
+  - [x] Create server/shared with stub files and go.mod
+  - [x] Create server/captions-sidecar with stub FastAPI and Dockerfile
+  - [x] Verify make dev brings up all four services cleanly
+  - [x] Verify go build ./... succeeds across Go modules from repo root
+- [x] Phase 1 — Auth & API keys (server/api/internal/auth)
+- [x] Phase 2 — Storage API (server/api/internal/storage)
+- [x] Phase 3 — Transcode pipeline
+- [x] Phase 4 — <MotionmeshPlayer>
+  - [x] Check Go API for playback URL endpoint
+  - [x] Add client.videos.getPlaybackUrl() in SDK (derive from object_key or dedicated endpoint)
+  - [x] Replace fake player div in videos/[id]/page.tsx with <MotionmeshPlayer>
+- [x] Phase 5 — Dashboard
+  - [x] npm run build passes in dashboard with zero TS errors
+- [x] Phase 6 — SDKs
+- [x] Phase 7 — Hardening
+- [x] Create context.md with project details
+- [x] Switch Anthropic to Gemini in captions-sidecar/app/transcribe.py
+- [x] Resolve `google.generativeai` import error in captions-sidecar
+- [x] Fix 500 error on /v1/buckets/{id}/objects by aligning database schema with Go models

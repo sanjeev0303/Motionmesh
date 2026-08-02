@@ -1,0 +1,34 @@
+---
+title: CDN & Custom Domains
+description: Serve video content at the edge with custom hostnames.
+---
+
+# Content Delivery Network
+
+Motionmesh operates a globally distributed edge network powered by Cloudflare Workers. It provides low-latency video streaming, automatically enforces signed URL policies, and scales to handle high-bandwidth events.
+
+## Signed URLs
+
+All playback requests through the CDN require a signature. The backend API handles this transparently when generating video URLs via `GET /v1/videos/{id}`. 
+
+If you are generating URLs manually for a player SDK, you need to sign them using your workspace's `CDN_SIGNING_SECRET`. The signature mechanism uses an HMAC-SHA256 hash of the requested path and expiry timestamp.
+
+## Custom Domains
+
+By default, Motionmesh serves your videos over a shared `.motionmesh.com` subdomain. Pro and Enterprise customers can serve videos via their own custom domain (e.g., `cdn.yourcompany.com`).
+
+### Adding a Custom Domain
+
+To onboard a custom domain:
+
+1. **Dashboard Setup:** Navigate to the **CDN** page in your Motionmesh Dashboard. Click **Add Domain** and enter your desired hostname (e.g., `video.example.com`).
+2. **DNS Configuration:** Our system will generate CNAME records required for SSL certificate validation and routing. You must add these to your domain's DNS provider (e.g., AWS Route 53, Cloudflare, GoDaddy).
+3. **Verification:** Our edge network will automatically poll for the DNS changes. Once verified, the SSL certificate will be provisioned, and your domain will become `Active`.
+
+<Callout title="Note">
+It may take up to 24 hours for DNS changes to propagate fully, although it typically happens within a few minutes. If the SSL status remains `Validation Timed Out`, double-check your DNS records.
+</Callout>
+
+### Routing
+
+Once active, any video normally accessible at `https://your-workspace.motionmesh.com/play/...` will automatically be accessible and fully functional at `https://video.example.com/play/...`.
