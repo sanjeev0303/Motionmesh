@@ -34,3 +34,4 @@
 - [x] Configure NPM registry authentication token
 - [x] Add NPM package links to README.md
 - [x] Redesign README.md as enterprise-grade landing page
+- [x] Increase logo size and apply branding color to README heading

@@ -2,10 +2,12 @@
   <!-- 1. Hero Section -->
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/df0nvtma5/image/upload/v1785687930/y4zanv58doxvubugnjcu.png">
-    <img alt="Motionmesh Logo" src="https://res.cloudinary.com/df0nvtma5/image/upload/v1785687930/y4zanv58doxvubugnjcu.png" width="100" height="100">
+    <img alt="Motionmesh Logo" src="https://res.cloudinary.com/df0nvtma5/image/upload/v1785687930/y4zanv58doxvubugnjcu.png" width="300" height="300">
   </picture>
 
-  <h1>Motionmesh</h1>
+  <h1 align="center">
+    <font size="7" color="#008AFF">Motionmesh</font>
+  </h1>
 
   <p><strong>Open-source video infrastructure for developers.</strong></p>
 
@@ -18,7 +20,8 @@
     <a href="https://motionmesh.com/docs/sdk">SDK</a> •
     <a href="https://discord.gg/motionmesh">Discord</a> •
     <a href="https://github.com/sanjeev0303/motionmesh/discussions">Discussions</a> •
-    <a href="https://www.npmjs.com/package/@motionmesh/sdk">NPM</a> •
+    <a href="https://www.npmjs.com/package/@motionmesh/sdk">@motionmesh/sdk</a> •
+    <a href="https://www.npmjs.com/package/@motionmesh/player">@motionmesh/player</a> •
     <a href="https://pypi.org/project/motionmesh/">PyPI</a>
   </p>
 
@@ -99,9 +102,9 @@ graph TD
 <div align="center">
   <table>
     <tr>
-      <td align="center"><strong>JavaScript SDK</strong><br>@motionmesh/sdk</td>
-      <td align="center"><strong>Player SDK</strong><br>@motionmesh/player</td>
-      <td align="center"><strong>Python SDK</strong><br>motionmesh</td>
+      <td align="center"><strong>JavaScript SDK</strong><br><a href="https://www.npmjs.com/package/@motionmesh/sdk">@motionmesh/sdk</a></td>
+      <td align="center"><strong>Player SDK</strong><br><a href="https://www.npmjs.com/package/@motionmesh/player">@motionmesh/player</a></td>
+      <td align="center"><strong>Python SDK</strong><br><a href="https://pypi.org/project/motionmesh/">motionmesh</a></td>
     </tr>
     <tr>
       <td align="center"><strong>REST API</strong><br>OpenAPI Spec</td>
