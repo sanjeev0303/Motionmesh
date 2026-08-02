@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@clerk/nextjs": "^5.7.6",
+    "@motionmesh/player": "file:../../sdk/js/packages/player",
+    "@motionmesh/sdk": "file:../../sdk/js/packages/sdk",
     "@radix-ui/react-dialog": "^1.1.19",
     "@radix-ui/react-label": "^2.1.11",
     "@radix-ui/react-popover": "^1.1.19",
@@ -35,9 +37,7 @@
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
-    "zustand": "^5.0.14",
-    "@motionmesh/sdk": "file:../../sdk/js/packages/sdk",
-    "@motionmesh/player": "file:../../sdk/js/packages/player"
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@types/mdx": "^2.0.14",

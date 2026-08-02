@@ -29,3 +29,8 @@
 - [x] Resolve `google.generativeai` import error in captions-sidecar
 - [x] Fix 500 error on /v1/buckets/{id}/objects by aligning database schema with Go models
 - [x] Phase 8 — Clean up root directory by removing unused files (`cors.json`, `go.work.bak`)
+- [x] Configure server-specific .gitignore
+- [x] Remove exposed secrets from git history and push to origin
+- [x] Configure NPM registry authentication token
+- [x] Add NPM package links to README.md
+- [x] Redesign README.md as enterprise-grade landing page
