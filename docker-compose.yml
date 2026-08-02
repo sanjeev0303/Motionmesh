@@ -37,7 +37,7 @@ services:
       cache_to:
         - type=local,dest=.buildcache/api,mode=max
     container_name: motionmesh-api
-    env_file: .env
+    env_file: ./server/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
       - QUEUE_URL=nats://nats:4222
@@ -61,7 +61,7 @@ services:
       cache_to:
         - type=local,dest=.buildcache/worker,mode=max
     container_name: motionmesh-worker
-    env_file: .env
+    env_file: ./server/.env
     environment:
       - REDIS_URL=redis://redis:6379/0
       - QUEUE_URL=nats://nats:4222
@@ -75,13 +75,14 @@ services:
 
   captions-sidecar:
     build:
-      context: ./server/captions-sidecar
+      context: ./server
+      dockerfile: ./captions-sidecar/Dockerfile
       cache_from:
         - type=local,src=.buildcache/captions
       cache_to:
         - type=local,dest=.buildcache/captions,mode=max
     container_name: motionmesh-captions-sidecar
-    env_file: ./server/captions-sidecar/.env
+    env_file: ./server/.env
     environment: []
     ports:
       - "8000:8000"
