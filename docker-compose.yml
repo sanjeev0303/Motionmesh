@@ -29,8 +29,8 @@ services:
 
   api:
     build:
-      context: .
-      dockerfile: ./server/api/Dockerfile
+      context: ./server
+      dockerfile: ./api/Dockerfile
       # Cache Go module downloads across builds
       cache_from:
         - type=local,src=.buildcache/api
@@ -54,8 +54,8 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: ./server/worker/Dockerfile
+      context: ./server
+      dockerfile: ./worker/Dockerfile
       cache_from:
         - type=local,src=.buildcache/worker
       cache_to:

@@ -1,52 +1,45 @@
-# Version control & IDE
-.git
-.gitignore
-.editorconfig
-.vscode
-.idea
+**/.git
+**/.gitignore
+**/.github
+**/.DS_Store
+**/Thumbs.db
 
-# Node
-node_modules
-**/node_modules
+# Environments
+**/.env
+**/.env.*
+!**/.env.example
+
+# IDEs
+**/.vscode
+**/.idea
+
+# Build caches & outputs
+**/.buildcache
+**/.cache
 **/.next
-**/out
-**/.turbo
+**/node_modules
+**/dist
+**/build
+**/.npm
 
 # Python
-.venv
 **/__pycache__
 **/*.pyc
-**/*.pyo
-**/.pytest_cache
+**/.venv
+**/venv
+**/env
 
-# OS artefacts
-.DS_Store
-*.log
+# Go
+**/bin
+**/*.out
+**/*.test
 
-# Test & sample files
-*.mp4
-*.mov
-*.avi
-test_*.go
-test_e2e.sh
-examples/
+# Logs
+**/*.log
 
-# Docs & non-build files
-README.md
-context.md
-*.md
-# sdk/
-
-# Local env files (passed via env_file in compose)
-.env
-.env.*
-*/.env
-*/.env.*
-
-# Misc
-infra/
-scripts/
-task.md
-
-# Cache
-.buildcache
+# Project specific
+**/infra/data
+**/infra/minio/data
+**/task.md
+**/implementation_plan.md
+**/walkthrough.md

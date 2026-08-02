@@ -8,14 +8,14 @@ stop:
 	docker compose down
 
 migrate:
-	@if [ -f scripts/run-migrations.sh ]; then \
-		bash scripts/run-migrations.sh; \
+	@if [ -f server/scripts/run-migrations.sh ]; then \
+		bash server/scripts/run-migrations.sh; \
 	else \
 		echo "Migration script not found"; \
 	fi
 
 test-all:
-	go test -v ./...
+	cd server && go test -v ./api/... ./shared/... ./worker/... ./scripts/...
 	@if [ -d server/captions-sidecar ]; then \
 		echo "Running python tests..."; \
 	fi

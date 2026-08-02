@@ -1,7 +1,0 @@
-go 1.25.10
-
-use (
-	./server/api
-	./server/shared
-	./server/worker
-)

@@ -8,20 +8,20 @@ bin/
 # Test binary, built with `go test -c`
 *.test
 
-# Output of the go coverage tool, specifically when used with LiteIDE
+# Output of the go coverage tool
 *.out
+coverage.txt
+coverage.html
 
-# Dependency directories (remove the comment below if you wish to clone and modify templates)
-# vendor/
-
-# Go workspace file
+# Go workspace
 go.work.user
 
 # Environment variables
 .env
-.env.local
+.env.*
+!.env.example
 
-# IDEs
+# IDEs / Editor
 .idea/
 .vscode/
 *.suo
@@ -29,8 +29,6 @@ go.work.user
 *.njsproj
 *.sln
 *.sw?
-
-# System Files
 .DS_Store
 Thumbs.db
 
@@ -43,14 +41,21 @@ venv/
 ENV/
 env/
 
-# Node/Next.js
+# Node/Next.js/React
 node_modules/
 .next/
 dist/
 build/
-.env*.local
+.npm/
 
 # Cache / Temp
 .cache/
 tmp/
 .buildcache/
+*.log
+
+# Infrastructure / Data
+infra/data/
+infra/minio/data/
+*.rdb
+*.aof
