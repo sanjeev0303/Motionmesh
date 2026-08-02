@@ -1,8 +1,8 @@
 <div align="center">
   <!-- 1. Hero Section -->
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://placehold.co/100x100?text=MM">
-    <img alt="Motionmesh Logo" src="https://placehold.co/100x100?text=MM" width="100" height="100">
+    <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/df0nvtma5/image/upload/v1785687930/y4zanv58doxvubugnjcu.png">
+    <img alt="Motionmesh Logo" src="https://res.cloudinary.com/df0nvtma5/image/upload/v1785687930/y4zanv58doxvubugnjcu.png" width="100" height="100">
   </picture>
 
   <h1>Motionmesh</h1>
@@ -44,7 +44,7 @@
 
 ## 3. Hero Description
 
-Motionmesh is a powerful, self-hosted video infrastructure platform designed specifically for developers. It provides everything you need to build scalable video applications—allowing you to upload, store, transcode, stream, and deliver high-quality video globally. 
+Motionmesh is a powerful, self-hosted video infrastructure platform designed specifically for developers. It provides everything you need to build scalable video applications—allowing you to upload, store, transcode, stream, and deliver high-quality video globally.
 
 Built with performance and developer experience in mind, Motionmesh leverages Go for its high-performance backend, FFmpeg for robust media processing, and Cloudflare for edge delivery. Combined with S3-compatible storage and deep integration with Next.js, TypeScript, and Python, Motionmesh delivers an enterprise-grade video stack out of the box.
 
@@ -212,7 +212,7 @@ Motionmesh handles the entire video lifecycle, from ingestion to analytics.
 
 ## 11. Authentication
 
-Motionmesh enforces a strict server-to-server security model via a proxy pattern. 
+Motionmesh enforces a strict server-to-server security model via a proxy pattern.
 
 > [!CAUTION]
 > Exposing your `MOTIONMESH_API_KEY` to the client is a severe security vulnerability.
@@ -224,7 +224,7 @@ sequenceDiagram
     participant Browser
     participant YourServer
     participant Motionmesh
-    
+
     Browser->>YourServer: Request Upload URL
     YourServer->>Motionmesh: Authenticated API Key Request
     Motionmesh-->>YourServer: Returns Signed Upload URL
