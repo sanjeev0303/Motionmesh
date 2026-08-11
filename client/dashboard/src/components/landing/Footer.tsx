@@ -21,7 +21,7 @@ export function Footer() {
             <ul className="space-y-3 text-sm text-text-muted">
               <li><Link href="#" className="hover:text-text-primary transition-colors">Object Storage</Link></li>
               <li><Link href="#" className="hover:text-text-primary transition-colors">Media Convert</Link></li>
-              <li><Link href="#" className="hover:text-text-primary transition-colors">Global CDN</Link></li>
+              <li><Link href="#" className="hover:text-text-primary transition-colors">AI Captions</Link></li>
               <li><Link href="#pricing" className="hover:text-text-primary transition-colors">Pricing</Link></li>
             </ul>
           </div>

@@ -125,7 +125,7 @@ export default function UsagePage() {
                 <h3 className="text-lg font-medium text-text-primary">Egress</h3>
               </div>
               <UsageMeter
-                label="CDN Bandwidth"
+                label="Outbound Bandwidth"
                 used={billing.egressUsedBytes}
                 limit={1024 * 1024 * 1024 * 1024 * 10}
                 formatAs="bytes"

@@ -1,3 +1,23 @@
+/**
+ * Thrown when a backend endpoint requires a higher subscription plan.
+ * Catch this specifically to show upgrade prompts instead of generic error UI.
+ *
+ * @example
+ * try {
+ *   await client.branding.update({ logoUrl: "https://..." });
+ * } catch (e) {
+ *   if (e instanceof PlanRequiredError) {
+ *     showUpgradePrompt(e.requiredPlan);
+ *   }
+ * }
+ */
+export class PlanRequiredError extends Error {
+  constructor(public requiredPlan: string) {
+    super(`This feature requires the ${requiredPlan} plan`);
+    this.name = "PlanRequiredError";
+  }
+}
+
 export const handleApiError = async (
   response: Response,
   context: string,
@@ -12,6 +32,18 @@ export const handleApiError = async (
 
   // Try to extract the real error message
   let errorMessage = "Request failed";
+  let errorData: any = null;
+
+  try {
+    errorData = await response.json();
+  } catch {
+    errorData = null;
+  }
+
+  // 403 with a plan-gate shape → throw typed PlanRequiredError
+  if (response.status === 403 && errorData?.required_plan) {
+    throw new PlanRequiredError(errorData.required_plan);
+  }
 
   switch (context) {
     case "initiate":
@@ -27,15 +59,11 @@ export const handleApiError = async (
       break;
   }
 
-  try {
-    const errorData = await response.json();
-
-    if (errorData.error) {
-      errorMessage = errorData.error;
-    } else if (errorData.message) {
-      errorMessage = errorData.message;
-    }
-  } catch (error) {
+  if (errorData?.error) {
+    errorMessage = errorData.error;
+  } else if (errorData?.message) {
+    errorMessage = errorData.message;
+  } else if (!errorData) {
     errorMessage = response.statusText || errorMessage;
   }
 

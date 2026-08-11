@@ -10,7 +10,7 @@ MotionMesh automatically generates WebVTT captions and chapter markers from your
 ## How auto-captions work
 
 ```
-Upload video → Worker extracts audio → Captions sidecar (Whisper) → .vtt stored in CDN
+Upload video → Worker extracts audio → Captions sidecar (Whisper) → .vtt stored in object storage
                                                                           ↓
                                                videos.captions_status = "ready"
 ```
@@ -21,7 +21,7 @@ Upload video → Worker extracts audio → Captions sidecar (Whisper) → .vtt s
 |-------------------|---------|
 | `pending` | Upload received, captioning not yet started |
 | `processing` | Whisper is transcribing |
-| `ready` | `.vtt` file available in CDN |
+| `ready` | `.vtt` file available in storage |
 | `failed` | Transcription failed (see logs) |
 
 ## Enabling auto-captions
@@ -65,14 +65,14 @@ const pollCaptionStatus = async (videoId: string) => {
 ```tsx
 import { MotionMeshPlayer } from "@motionmesh/player/react";
 
-const CDN = "https://cdn.motionmesh.io";
+const API_URL = "https://api.motionmesh.io";
 
 <MotionMeshPlayer
-  src={`${CDN}/videos/${videoId}/hls/master.m3u8`}
-  poster={`${CDN}/videos/${videoId}/poster.jpg`}
+  src={`${API_URL}/v1/videos/${videoId}/hls/master.m3u8`}
+  poster={`${API_URL}/v1/buckets/default/objects/videos/${videoId}/poster.jpg`}
   captions={[
     {
-      src: `${CDN}/videos/${videoId}/captions/en.vtt`,
+      src: `${API_URL}/v1/buckets/default/objects/videos/${videoId}/captions/en.vtt`,
       label: "English",
       language: "en",
       default: true,
@@ -92,7 +92,7 @@ const { chapters } = await fetch(`/api/videos/${videoId}/chapters`).then(r => r.
 // chapters: [{ start_time_seconds: 0, title: "Intro" }, ...]
 
 <MotionMeshPlayer
-  src={`${CDN}/videos/${videoId}/hls/master.m3u8`}
+  src={`${API_URL}/v1/videos/${videoId}/hls/master.m3u8`}
   chapters={chapters.map(c => ({
     startTime: c.start_time_seconds,
     title: c.title,
@@ -120,10 +120,10 @@ If you're not using `@motionmesh/player`, add the `.vtt` as a `<track>` element 
 
 ```html
 <video controls>
-  <source src="https://cdn.motionmesh.io/videos/vid_abc/hls/master.m3u8" type="application/x-mpegURL" />
+  <source src="https://api.motionmesh.io/v1/videos/vid_abc/hls/master.m3u8" type="application/x-mpegURL" />
   <track
     kind="subtitles"
-    src="https://cdn.motionmesh.io/videos/vid_abc/captions/en.vtt"
+    src="https://api.motionmesh.io/v1/buckets/default/objects/videos/vid_abc/captions/en.vtt"
     srclang="en"
     label="English"
     default

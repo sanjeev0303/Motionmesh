@@ -11,7 +11,6 @@ export function MobileNav() {
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, match: (p: string) => p === "/dashboard" },
     { name: "Buckets", href: "/dashboard/buckets", icon: HardDrive, match: (p: string) => p.startsWith("/dashboard/buckets") },
     { name: "Videos", href: "/dashboard/videos", icon: Video, match: (p: string) => p.startsWith("/dashboard/videos") },
-    { name: "CDN", href: "/dashboard/cdn", icon: Globe, match: (p: string) => p.startsWith("/dashboard/cdn") },
     { name: "Keys", href: "/dashboard/keys", icon: Key, match: (p: string) => p.startsWith("/dashboard/keys") },
     { name: "Usage", href: "/dashboard/usage", icon: Activity, match: (p: string) => p.startsWith("/dashboard/usage") },
     { name: "Billing", href: "/dashboard/billing", icon: CreditCard, match: (p: string) => p.startsWith("/dashboard/billing") },

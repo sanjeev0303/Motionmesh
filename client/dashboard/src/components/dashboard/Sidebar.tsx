@@ -30,7 +30,6 @@ export function Sidebar() {
   ];
 
   const infraItems = [
-    { name: "CDN & Domains", href: "/dashboard/cdn", icon: Globe, match: (p: string) => p.startsWith("/dashboard/cdn") },
     { name: "Player Branding", href: "/dashboard/branding", icon: MonitorPlay, match: (p: string) => p.startsWith("/dashboard/branding") },
     { name: "API Keys", href: "/dashboard/keys", icon: Key, match: (p: string) => p.startsWith("/dashboard/keys") },
   ];

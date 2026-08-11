@@ -35,7 +35,7 @@ WORKDIR /app
 COPY --from=pip-deps /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=pip-deps /usr/local/bin /usr/local/bin
 
-COPY app/ ./app/
+COPY captions-sidecar/app/ ./app/
 
 RUN adduser --disabled-password --gecos '' --uid 1001 appuser \
     && mkdir -p /tmp/huggingface \

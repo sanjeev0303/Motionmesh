@@ -1,6 +1,6 @@
 # @motionmesh/sdk
 
-The official JavaScript/TypeScript client for Motionmesh, providing programmatic access to storage, video transcoding, and CDN services.
+The official JavaScript/TypeScript client for Motionmesh, providing programmatic access to storage and video transcoding services.
 
 ## Installation
 

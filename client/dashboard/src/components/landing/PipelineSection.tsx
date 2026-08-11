@@ -13,7 +13,7 @@ export function PipelineSection() {
     {
       num: "03",
       title: "Stream",
-      desc: "Delivered via a global edge CDN using HLS or DASH with minimal latency.",
+      desc: "Delivered directly via adaptive HLS or DASH streaming with minimal latency.",
     },
   ];
 

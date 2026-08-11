@@ -108,7 +108,7 @@ export function MeshAnimation() {
           </div>
         </div>
 
-        {/* Connecting Lines ABR -> CDN */}
+        {/* Connecting Lines ABR -> Edge */}
         <div className="absolute left-[52%] right-[12%] h-full flex flex-col justify-center pointer-events-none">
            {nodes.map((_, i) => (
             <motion.div
@@ -123,7 +123,7 @@ export function MeshAnimation() {
           ))}
         </div>
 
-        {/* Step 3: CDN Nodes */}
+        {/* Step 3: Edge Nodes */}
         <div className="flex flex-col gap-6 md:gap-8 z-10">
           {nodes.map((_, i) => (
             <motion.div

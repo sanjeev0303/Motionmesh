@@ -1,6 +1,6 @@
 # motionmesh
 
-The official Python SDK for Motionmesh, providing programmatic access to storage, video transcoding, and CDN services.
+The official Python SDK for Motionmesh, providing programmatic access to storage and video transcoding services.
 
 ## Installation
 

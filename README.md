@@ -65,8 +65,7 @@ graph TD
     Queue -->|Process Job| Workers[Worker Fleet]
     Workers -->|Transcode| FFmpeg[FFmpeg Processing]
     FFmpeg -->|Save Assets| Storage[S3 Compatible Storage]
-    Storage -->|Deliver| CDN[Cloudflare CDN]
-    CDN -->|Stream HLS/CMAF| Player[Motionmesh Player]
+    Storage -->|Stream HLS/CMAF| Player[Motionmesh Player]
 ```
 
 ---
@@ -75,10 +74,10 @@ graph TD
 
 - **Developer Experience (DX):** Intuitive SDKs, comprehensive documentation, and a focus on type safety make integrating video into your app a breeze.
 - **Scalability:** Built on Go and NATS, the architecture scales horizontally to handle massive workloads.
-- **Cost Effective:** Bring your own S3 storage and Cloudflare CDN, avoiding the massive markups of traditional Video-as-a-Service providers.
+- **Cost Effective:** Bring your own S3 storage, avoiding the massive markups of traditional Video-as-a-Service providers.
 - **Security by Design:** Motionmesh utilizes a proxy pattern to ensure your API keys are never exposed to the client.
 - **Self-Hosting Freedom:** Full control over your infrastructure with production-ready Docker and Kubernetes configurations.
-- **Cloud Support:** Seamlessly integrates with AWS, Backblaze, Cloudflare, and more.
+- **Cloud Support:** Seamlessly integrates with AWS, Backblaze, and more.
 
 ---
 
@@ -89,7 +88,6 @@ graph TD
 | **Storage** | • S3-compatible Object Storage<br>• Dual-bucket support (upload/output)<br>• Bring-your-own storage |
 | **Video** | • FFmpeg Transcoding<br>• Adaptive Bitrate (ABR) Ladder (1080p - 240p)<br>• HLS / CMAF Output<br>• Watermarking<br>• Thumbnail Generation<br>• Preview Clips<br>• Scrub Sprites |
 | **AI** | • Automated Captions<br>• Transcript Generation<br>• Chapter Detection |
-| **CDN** | • Cloudflare Integration<br>• Edge Delivery<br>• Signed Playback URLs<br>• Custom Domains |
 | **SDK** | • Type-safe JavaScript/TypeScript SDK<br>• Python SDK<br>• React Player Component |
 | **Dashboard** | • Asset Management<br>• Analytics<br>• Billing<br>• User Management<br>• API Key Generation<br>• Log Viewing |
 | **Auth** | • Strict Server-to-Server Proxy Pattern<br>• Signed URLs<br>• JWT Verification |
@@ -191,7 +189,7 @@ import "@motionmesh/player/styles.css";
 export default function VideoPage() {
   return (
     <div className="video-container">
-      <MotionmeshPlayer src="https://cdn.yourdomain.com/video/hls.m3u8" />
+      <MotionmeshPlayer src="https://api.yourdomain.com/v1/videos/vid_123/hls/master.m3u8" />
     </div>
   );
 }
@@ -207,7 +205,7 @@ Motionmesh handles the entire video lifecycle, from ingestion to analytics.
 
 1. **Upload:** Securely upload source media directly to your S3 bucket.
 2. **Transcode:** Our worker fleet spins up FFmpeg to generate HLS/CMAF ladders, AI captions, and thumbnails.
-3. **Playback:** The CDN delivers the video edge-optimized via Signed URLs.
+3. **Playback:** HLS streams are served directly from storage via secure URLs.
 4. **Player:** The `@motionmesh/player` handles seamless Adaptive Bitrate (ABR) streaming.
 5. **Analytics:** The player reports telemetry back to the dashboard.
 
@@ -296,7 +294,7 @@ For total control, Motionmesh exposes a fully documented REST API.
 
 ```text
 motionmesh/
-├── server/          # Go API, worker fleet, and CDN worker
+├── server/          # Go API, worker fleet, and AI sidecar
 │   ├── api/         # Core REST API (Go)
 │   ├── worker/      # Transcoding and FFmpeg task runner (Go)
 │   ├── shared/      # Shared types and utilities (Go)
@@ -360,13 +358,6 @@ Configure your instance using standard environment variables.
 ### Queue
 - `QUEUE_URL` — NATS connection string.
 
-### Cloudflare
-- `CLOUDFLARE_API_TOKEN` — API token for DNS/CDN.
-- `CLOUDFLARE_ZONE_ID` — Zone ID.
-- `CLOUDFLARE_ACCOUNT_ID` — Account ID.
-- `CDN_SIGNING_SECRET` — URL signing secret.
-- `CDN_FALLBACK_ORIGIN` — Fallback origin routing.
-
 ### Billing
 - `STRIPE_SECRET_KEY` — Stripe API key.
 - `STRIPE_WEBHOOK_SECRET` — Stripe webhook signing secret.
@@ -383,7 +374,6 @@ Motionmesh is built for the cloud. We provide out-of-the-box support for:
 - **Docker & Docker Compose:** Perfect for single-node deployments.
 - **Kubernetes:** Helm charts for high availability and auto-scaling.
 - **Terraform:** Infrastructure as code for AWS/GCP provisioning.
-- **Cloudflare Workers:** Deploy the edge CDN router effortlessly.
 
 ---
 
@@ -398,7 +388,6 @@ Our production topology is designed for resilience:
 - **Worker Fleet:** Auto-scaling Go workers processing media.
 - **FFmpeg:** Hardware-accelerated transcoding.
 - **Storage:** S3/B2 object storage for durability.
-- **CDN:** Cloudflare Edge caching for ultra-low latency playback.
 
 ---
 
@@ -426,7 +415,7 @@ Dive deeper into the platform:
 |---|---|
 | **Upload Throughput** | ~500 Mbps per node |
 | **Transcode Speed** | 3x Real-time (1080p -> HLS Ladder) |
-| **Playback Latency** | < 2 seconds (Global CDN) |
+| **Playback Latency** | < 2 seconds |
 | **Startup Time** | < 50ms API overhead |
 | **Worker Scaling** | 0 to 100 instances in < 15 seconds |
 
@@ -440,7 +429,6 @@ Dive deeper into the platform:
 - [x] Next.js Dashboard
 - [ ] Python SDK
 - [ ] AI Search & Transcripts
-- [ ] Edge Functions (Custom CDN Routing)
 - [ ] Webhooks & Events
 - [ ] Live Streaming Support
 - [ ] DRM (Digital Rights Management)

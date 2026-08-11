@@ -45,7 +45,7 @@ function deriveStatus(subscription: any): SystemStatus {
       { name: "API", status: "operational" },
       { name: "Transcoding Pipeline", status: "operational" },
       { name: "Storage Hub", status: "operational" },
-      { name: "CDN Edge", status: "operational" },
+      { name: "AI Captions & Subtitles", status: "operational" },
     ],
   };
 }

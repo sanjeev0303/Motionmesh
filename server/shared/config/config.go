@@ -30,13 +30,6 @@ type Config struct {
 	// Worker / Sidecar
 	CaptionsSidecarURL string
 	AnthropicAPIKey    string
-
-	// CDN Configuration
-	CloudflareAPIToken  string
-	CloudflareZoneID    string
-	CloudflareAccountID string
-	CDNSigningSecret    string
-	CDNFallbackOrigin   string
 }
 
 func Load() *Config {
@@ -61,12 +54,6 @@ func Load() *Config {
 
 		CaptionsSidecarURL: getEnv("CAPTIONS_SIDECAR_URL", "http://localhost:8000"),
 		AnthropicAPIKey:    getEnv("ANTHROPIC_API_KEY", ""),
-
-		CloudflareAPIToken:  getEnv("CLOUDFLARE_API_TOKEN", ""),
-		CloudflareZoneID:    getEnv("CLOUDFLARE_ZONE_ID", ""),
-		CloudflareAccountID: getEnv("CLOUDFLARE_ACCOUNT_ID", ""),
-		CDNSigningSecret:    getEnv("CDN_SIGNING_SECRET", ""),
-		CDNFallbackOrigin:   getEnv("CDN_FALLBACK_ORIGIN", ""),
 	}
 }
 

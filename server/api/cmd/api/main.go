@@ -29,8 +29,6 @@ import (
 	brandingpostgres "github.com/motionmesh/server/api/internal/branding/postgres"
 	"github.com/motionmesh/server/api/internal/buckets"
 	bucketspostgres "github.com/motionmesh/server/api/internal/buckets/postgres"
-	"github.com/motionmesh/server/api/internal/cdn"
-	cdnpostgres "github.com/motionmesh/server/api/internal/cdn/postgres"
 	apimiddleware "github.com/motionmesh/server/api/internal/middleware"
 
 	"github.com/motionmesh/server/shared/storage"
@@ -130,10 +128,6 @@ func main() {
 	videosSvc := videos.NewService(videosRepo)
 	transcodeSvc := transcode.NewService(db, nc)
 
-	// ── CDN ───────────────────────────────────────────────────────────────────
-	var cdnRepo cdn.Repository = cdnpostgres.NewCDNRepository(db)
-	cdnSvc := cdn.NewCDNService(cdnRepo, cfg)
-
 	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
 	
@@ -218,18 +212,6 @@ func main() {
 		r.Route("/v1/billing", func(r chi.Router) {
 			billingHandler := billing.NewHandler(billingSvc)
 			billingHandler.RegisterRoutes(r)
-		})
-
-		// CDN (pro tier only)
-		r.Route("/v1/cdn", func(r chi.Router) {
-			r.Use(apimiddleware.RequirePlan("pro", billingSvc))
-			cdnHandler := cdn.NewHandler(cdnSvc)
-			// Re-register routes stripped of the /cdn prefix because chi.Router mounts at /v1/cdn
-			r.Get("/domains", cdnHandler.HandleListDomains)
-			r.Post("/domains", cdnHandler.HandleAddDomain)
-			r.Get("/domains/{id}", cdnHandler.HandleGetDomainStatus)
-			r.Delete("/domains/{id}", cdnHandler.HandleDeleteDomain)
-			r.Get("/stats", cdnHandler.HandleGetStats)
 		})
 	})
 

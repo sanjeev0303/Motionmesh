@@ -35,3 +35,22 @@
 - [x] Add NPM package links to README.md
 - [x] Redesign README.md as enterprise-grade landing page
 - [x] Increase logo size and apply branding color to README heading
+- [x] Implement client.cdn.* namespace on @motionmesh/sdk (addDomain, listDomains, getDomain, deleteDomain, getStats, waitUntilActive)
+- [x] Add PlanRequiredError typed exception for 403 plan-gate responses
+- [x] Wire cdn.* dispatch cases into processRequest.ts
+- [x] Export CDNDomain, CDNStats, PlanRequiredError from SDK public surface
+- [x] Extract CDN into standalone @motionmesh/cdn package (sdk/js/packages/cdn)
+  - [x] client.ts — browser-safe proxy-routed functions
+  - [x] server.ts — direct API + handleCDNRequest dispatch handler
+  - [x] errors.ts — PlanRequiredError + handleCDNError
+  - [x] types.ts — CDNDomain, CDNStats
+  - [x] Builds: ESM + CJS + DTS for both index and server entries
+- [x] Strip cdn.* from @motionmesh/sdk (processRequest, client/index, types, exports)
+- [x] Remove all CDN concepts and code from application
+  - [x] Delete `sdk/js/packages/cdn` package
+  - [x] Remove CDN handlers, routes, service, repository, and models from Go backend
+  - [x] Delete `server/cdn-worker`
+  - [x] Delete `server/scripts/migrations/006_cdn_domains.sql`
+  - [x] Remove CDN references from OpenAPI spec, shared config, and `.env.example`
+  - [x] Remove CDN pages, docs, navigation links, and metrics from dashboard
+  - [x] Remove CDN sections from README.md and SDK docs

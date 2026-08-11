@@ -20,11 +20,11 @@ export function FeaturesSection() {
       ]
     },
     {
-      category: "Global CDN",
+      category: "AI Subtitles & Player",
       items: [
-        "99.99% Edge uptime",
-        "Optimized for HLS & DASH",
-        "Cache hit ratio > 98%",
+        "Auto-generated Whisper captions",
+        "Chapter marker extraction",
+        "Customizable HTML5 player",
         "Token-authenticated playback",
       ]
     }

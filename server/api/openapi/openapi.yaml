@@ -4,34 +4,6 @@ info:
   version: 1.0.0
 components:
   schemas:
-    CDNStats:
-      type: object
-      properties:
-        outbound_bytes:
-          type: integer
-        cost_cents:
-          type: integer
-    CDNDomain:
-      type: object
-      properties:
-        id:
-          type: string
-        account_id:
-          type: string
-        hostname:
-          type: string
-        cloudflare_hostname_id:
-          type: string
-        hostname_status:
-          type: string
-        ssl_status:
-          type: string
-        verification_errors:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
   securitySchemes:
     bearerAuth:
       type: http
@@ -244,70 +216,3 @@ paths:
       responses:
         '204':
           description: No Content
-  /v1/cdn/domains:
-    get:
-      summary: List CDN domains
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CDNDomain'
-    post:
-      summary: Add custom CDN domain
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                hostname:
-                  type: string
-      responses:
-        '201':
-          description: Created
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CDNDomain'
-  /v1/cdn/domains/{id}:
-    get:
-      summary: Get CDN domain status
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CDNDomain'
-    delete:
-      summary: Delete CDN domain
-      parameters:
-      - name: id
-        in: path
-        required: true
-        schema:
-          type: string
-      responses:
-        '204':
-          description: No Content
-  /v1/cdn/stats:
-    get:
-      summary: Get CDN stats
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CDNStats'

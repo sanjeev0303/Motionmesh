@@ -17,7 +17,7 @@ export default function VideoPage() {
   // Pass the signed playback URL obtained from the Motionmesh SDK
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <MotionmeshPlayer src="https://cdn.motionmesh.com/playback/..." />
+      <MotionmeshPlayer src="https://api.motionmesh.com/v1/videos/vid_123/hls/master.m3u8" />
     </div>
   );
 }
