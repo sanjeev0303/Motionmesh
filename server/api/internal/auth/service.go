@@ -17,6 +17,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2/jwks"
 	"github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/motionmesh/server/api/internal/auth/cache"
+	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
@@ -51,9 +52,10 @@ type Service struct {
 	rdb        *redis.Client
 	local      *cache.LocalCache
 	sf         singleflight.Group
+	log        *logger.Logger
 }
 
-func NewService(repo AccountRepository, rdb *redis.Client, secretKey, _ string) *Service {
+func NewService(repo AccountRepository, rdb *redis.Client, secretKey, _ string, log *logger.Logger) *Service {
 	clerk.SetKey(secretKey)
 	local, _ := cache.NewLocalCache(10_000) // oversized is fine; eviction is LRU
 	return &Service{
@@ -61,6 +63,7 @@ func NewService(repo AccountRepository, rdb *redis.Client, secretKey, _ string) 
 		rdb:        rdb,
 		jwksClient: jwks.NewClient(&clerk.ClientConfig{}),
 		local:      local,
+		log:        log,
 	}
 }
 
@@ -248,7 +251,13 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 //	(nil, invalid=false, found=false)  — cache miss or Redis error
 func (s *Service) checkRedis(ctx context.Context, cKey, digest string) (account *models.Account, invalid bool, found bool) {
 	data, err := s.rdb.HGetAll(ctx, cKey).Result()
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		if err != redis.Nil {
+			s.log.Error("redis error getting %s: %v", cKey, err)
+		}
+		return nil, false, false
+	}
+	if len(data) == 0 {
 		return nil, false, false // miss or Redis unavailable — fall through to DB
 	}
 	if data["invalid"] == "1" {

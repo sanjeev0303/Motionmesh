@@ -114,7 +114,7 @@ func main() {
 	consumer := job.NewConsumer(nc, jobHandler, log, concurrency)
 
 	// ── Start Consumers ──────────────────────────────────────────────────────
-	cleanupConsumer := cleanup.NewConsumer(nc, storageAdapter, log)
+	cleanupConsumer := cleanup.NewConsumer(nc, storageAdapter, log, cfg.CleanupConcurrency)
 	go func() {
 		if err := cleanupConsumer.Start(ctx); err != nil {
 			log.Error("cleanup consumer failed: %v", err)

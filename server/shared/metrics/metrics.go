@@ -52,6 +52,22 @@ var (
 			Help: "Total number of failed jobs",
 		},
 	)
+
+	// CleanupJobsProcessedTotal counts total completed cleanup jobs.
+	CleanupJobsProcessedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "motionmesh_cleanup_jobs_processed_total",
+			Help: "Total number of completed cleanup jobs",
+		},
+	)
+
+	// CleanupJobsFailedTotal counts total failed cleanup jobs.
+	CleanupJobsFailedTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "motionmesh_cleanup_jobs_failed_total",
+			Help: "Total number of failed cleanup jobs",
+		},
+	)
 )
 
 func init() {
@@ -61,6 +77,8 @@ func init() {
 	Registry.MustRegister(WorkerJobsActive)
 	Registry.MustRegister(WorkerJobsProcessedTotal)
 	Registry.MustRegister(WorkerJobsFailedTotal)
+	Registry.MustRegister(CleanupJobsProcessedTotal)
+	Registry.MustRegister(CleanupJobsFailedTotal)
 }
 
 // Handler returns an http.Handler for exposing Prometheus metrics.

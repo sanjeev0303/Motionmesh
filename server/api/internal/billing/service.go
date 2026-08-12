@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/nats-io/nats.go"
@@ -30,14 +32,17 @@ type Service struct {
 	rdb            *redis.Client
 	webhookSecret  string
 	meterEventName string // Stripe Meter name (e.g. "api_requests")
+	sfGroup        singleflight.Group
+	log            *logger.Logger
 }
 
-func NewService(repo BillingRepository, rdb *redis.Client, stripeSecretKey, webhookSecret string) *Service {
+func NewService(repo BillingRepository, rdb *redis.Client, stripeSecretKey, webhookSecret string, log *logger.Logger) *Service {
 	stripe.Key = stripeSecretKey
 	return &Service{
 		repo:          repo,
 		rdb:           rdb,
 		webhookSecret: webhookSecret,
+		log:           log,
 	}
 }
 
@@ -83,6 +88,9 @@ func (s *Service) CheckBalance(ctx context.Context, accountID, resourceType stri
 		}
 		return nil
 	}
+	if err != redis.Nil {
+		s.log.Error("redis error getting balance for %s: %v", cacheKey, err)
+	}
 
 	used, err := s.repo.GetAggregatedUsage(ctx, accountID, resourceType)
 	if err != nil {
@@ -107,19 +115,34 @@ func (s *Service) GetAccountPlan(ctx context.Context, accountID string) (string,
 	if err == nil {
 		return plan, nil
 	}
+	if err != redis.Nil {
+		s.log.Error("redis error getting plan for %s: %v", cacheKey, err)
+	}
 	
-	// If not in cache, we need to get it from DB. 
-	// But billing repo only has GetAccountByStripeCustomerID. We might need a method GetAccountByID.
-	// Wait, we can get it from another repo, or add GetAccountByID to BillingRepository.
-	// Let's add it to BillingRepository.
-	acc, err := s.repo.GetAccountByID(ctx, accountID)
+	v, err, _ := s.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		// Double check cache
+		plan, err := s.rdb.Get(ctx, cacheKey).Result()
+		if err == nil {
+			return plan, nil
+		}
+		if err != redis.Nil {
+			s.log.Error("redis error getting plan for %s in sf: %v", cacheKey, err)
+		}
+
+		acc, err := s.repo.GetAccountByID(ctx, accountID)
+		if err != nil {
+			return "", err
+		}
+		
+		// Cache for 60 seconds
+		s.rdb.Set(ctx, cacheKey, acc.Plan, 60*time.Second)
+		return acc.Plan, nil
+	})
+
 	if err != nil {
 		return "", err
 	}
-	
-	// Cache for 60 seconds
-	s.rdb.Set(ctx, cacheKey, acc.Plan, 60*time.Second)
-	return acc.Plan, nil
+	return v.(string), nil
 }
 
 // HandleWebhook processes Stripe webhooks. Updates accounts.plan/status in Postgres.
@@ -223,15 +246,33 @@ func (s *Service) GetAggregatedUsage(ctx context.Context, accountID, eventType s
 	if err == nil {
 		return cached, nil
 	}
+	if err != redis.Nil {
+		s.log.Error("redis error getting aggregated usage for %s: %v", cacheKey, err)
+	}
 
-	used, err := s.repo.GetAggregatedUsage(ctx, accountID, eventType)
+	v, err, _ := s.sfGroup.Do(cacheKey, func() (interface{}, error) {
+		cached, err := s.rdb.Get(ctx, cacheKey).Int64()
+		if err == nil {
+			return cached, nil
+		}
+		if err != redis.Nil {
+			s.log.Error("redis error getting aggregated usage for %s in sf: %v", cacheKey, err)
+		}
+
+		used, err := s.repo.GetAggregatedUsage(ctx, accountID, eventType)
+		if err != nil {
+			return int64(0), err
+		}
+
+		// Cache for 60 seconds
+		s.rdb.Set(ctx, cacheKey, used, 60*time.Second)
+		return used, nil
+	})
+	
 	if err != nil {
 		return 0, err
 	}
-
-	// Cache for 60 seconds
-	s.rdb.Set(ctx, cacheKey, used, 60*time.Second)
-	return used, nil
+	return v.(int64), nil
 }
 
 // AddFunds adds the specified amount (in cents) to the account's prepaid balance.

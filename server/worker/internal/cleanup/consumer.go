@@ -4,24 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
+	"sync"
 	"time"
 
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/storage"
 	"github.com/nats-io/nats.go"
 )
 
 type Consumer struct {
-	nc      *nats.Conn
-	storage storage.ObjectStorage
-	log     *logger.Logger
+	nc          *nats.Conn
+	storage     storage.ObjectStorage
+	log         *logger.Logger
+	concurrency int
 }
 
-func NewConsumer(nc *nats.Conn, storage storage.ObjectStorage, log *logger.Logger) *Consumer {
+func NewConsumer(nc *nats.Conn, storage storage.ObjectStorage, log *logger.Logger, concurrency int) *Consumer {
 	return &Consumer{
-		nc:      nc,
-		storage: storage,
-		log:     log,
+		nc:          nc,
+		storage:     storage,
+		log:         log,
+		concurrency: concurrency,
 	}
 }
 
@@ -64,12 +69,16 @@ func (c *Consumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to pull subscribe cleanup: %w", err)
 	}
 
-	c.log.Info("Started NATS consumer for video.cleanup")
+	c.log.Info("Started NATS consumer for video.cleanup (concurrency: %d)", c.concurrency)
+
+	sem := make(chan struct{}, c.concurrency)
+	var wg sync.WaitGroup
 
 	for {
 		select {
 		case <-ctx.Done():
 			c.log.Info("Cleanup consumer shutting down")
+			wg.Wait()
 			return nil
 		default:
 			msgs, err := sub.Fetch(10, nats.MaxWait(5*time.Second))
@@ -81,7 +90,13 @@ func (c *Consumer) Start(ctx context.Context) error {
 			}
 
 			for _, msg := range msgs {
-				c.handleMessage(ctx, msg)
+				sem <- struct{}{}
+				wg.Add(1)
+				go func(m *nats.Msg) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					c.handleMessage(ctx, m)
+				}(msg)
 			}
 		}
 	}
@@ -112,10 +127,16 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 		if key != "" {
 			if err := c.storage.DeleteObject(ctx, key); err != nil {
 				c.log.Error("failed to delete storage key %s for video %s: %v", key, payload.VideoID, err)
+				msg.Nak()
+				metrics.CleanupJobsFailedTotal.Inc()
+				return
 			}
 		}
 	}
 
-	c.log.Info("Cleanup completed successfully for video %s", payload.VideoID)
+	if rand.Intn(100) == 0 {
+		c.log.Info("Cleanup completed successfully for video %s (sampled)", payload.VideoID)
+	}
 	msg.Ack()
+	metrics.CleanupJobsProcessedTotal.Inc()
 }

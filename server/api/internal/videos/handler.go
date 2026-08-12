@@ -18,6 +18,7 @@ import (
 	"github.com/motionmesh/server/api/internal/transcode"
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/pagination"
 	"github.com/motionmesh/server/shared/storage"
 )
 
@@ -67,6 +68,10 @@ func (h *Handler) HandleListVideos(w http.ResponseWriter, r *http.Request) {
 
 	videos, err := h.svc.ListVideos(r.Context(), acc.ID, extUserID, limit, cursor)
 	if err != nil {
+		if err == pagination.ErrInvalidCursor {
+			http.Error(w, "Invalid cursor format", http.StatusBadRequest)
+			return
+		}
 		logger.New().Error("list videos: %v", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -79,15 +84,12 @@ func (h *Handler) HandleListVideos(w http.ResponseWriter, r *http.Request) {
 	var nextCursor string
 	if len(videos) == limit && len(videos) > 0 {
 		lastVideo := videos[len(videos)-1]
-		c := struct {
-			CreatedAt time.Time `json:"created_at"`
-			ID        string    `json:"id"`
-		}{
+		c := pagination.VideoCursor{
 			CreatedAt: lastVideo.CreatedAt,
 			ID:        lastVideo.ID,
 		}
-		if b, err := json.Marshal(c); err == nil {
-			nextCursor = base64.URLEncoding.EncodeToString(b)
+		if encoded, err := pagination.EncodeCursor(c); err == nil {
+			nextCursor = encoded
 		}
 	}
 

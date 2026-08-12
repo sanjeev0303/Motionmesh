@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"math/rand"
 
 	"golang.org/x/sync/errgroup"
 
@@ -66,7 +67,13 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 			cStatusStr = *cStatus
 		}
 		
-		h.log.Info("Job terminated for video %s: status=%s, captions_status=%s", videoID, statusStr, cStatusStr)
+		if statusStr == "ready" && cStatusStr == "ready" {
+			if rand.Intn(100) == 0 {
+				h.log.Info("Job terminated for video %s: status=%s, captions_status=%s (sampled)", videoID, statusStr, cStatusStr)
+			}
+		} else {
+			h.log.Info("Job terminated for video %s: status=%s, captions_status=%s", videoID, statusStr, cStatusStr)
+		}
 	}()
 
 	h.log.Info("Starting processing for video: %s", videoID)
@@ -343,7 +350,10 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 		h.publishUsageEvent(accountID, videoID, probeRes.Duration)
 	}
 
-	h.log.Info("Completed processing for video: %s", videoID)
+	// This was originally logged on every job completion, let's leave it up to the defer block to log success or just sample it here as well.
+	if rand.Intn(100) == 0 {
+		h.log.Info("Completed processing for video: %s (sampled)", videoID)
+	}
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/pagination"
 )
 
 type Repository struct {
@@ -20,14 +21,10 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 func (r *Repository) ListByAccount(ctx context.Context, accountID string) ([]*models.Bucket, error) {
 	query := `
-		SELECT b.id, b.account_id, b.name, b.created_at,
-		       COALESCE(SUM(o.size_bytes), 0) as storage_used_bytes,
-		       COUNT(o.id) as object_count
-		FROM buckets b
-		LEFT JOIN objects o ON b.id = o.bucket_id
-		WHERE b.account_id = $1
-		GROUP BY b.id
-		ORDER BY b.created_at DESC
+		SELECT id, account_id, name, created_at, total_bytes, total_objects
+		FROM buckets
+		WHERE account_id = $1
+		ORDER BY created_at DESC
 	`
 	rows, err := r.db.Query(ctx, query, accountID)
 	if err != nil {
@@ -112,16 +109,12 @@ func (r *Repository) ListObjectsByBucket(ctx context.Context, bucketID string, l
 	args := []interface{}{bucketID}
 
 	if cursor != "" {
-		var c struct {
-			UploadedAt time.Time `json:"uploaded_at"`
-			ID         string    `json:"id"`
+		c, err := pagination.DecodeCursor[pagination.ObjectCursor](cursor)
+		if err != nil {
+			return nil, err
 		}
-		if decoded, err := base64.URLEncoding.DecodeString(cursor); err == nil {
-			if err := json.Unmarshal(decoded, &c); err == nil {
-				query += ` AND (uploaded_at, id) < ($2, $3) ORDER BY uploaded_at DESC, id DESC LIMIT $4`
-				args = append(args, c.UploadedAt, c.ID, limit)
-			}
-		}
+		query += ` AND (uploaded_at, id) < ($2, $3) ORDER BY uploaded_at DESC, id DESC LIMIT $4`
+		args = append(args, c.UploadedAt, c.ID, limit)
 	}
 
 	if len(args) == 1 {

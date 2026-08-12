@@ -32,20 +32,25 @@ func InsertEvent(ctx context.Context, tx pgx.Tx, subject string, payload interfa
 
 // Relay handles polling the outbox table and publishing to NATS.
 type Relay struct {
-	db  *pgxpool.Pool
-	js  nats.JetStreamContext
-	log *logger.Logger
+	db        *pgxpool.Pool
+	js        nats.JetStreamContext
+	log       *logger.Logger
+	batchSize int
 }
 
-func NewRelay(db *pgxpool.Pool, nc *nats.Conn, log *logger.Logger) (*Relay, error) {
+func NewRelay(db *pgxpool.Pool, nc *nats.Conn, batchSize int, log *logger.Logger) (*Relay, error) {
 	js, err := nc.JetStream()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get jetstream context: %w", err)
 	}
+	if batchSize <= 0 {
+		batchSize = 100
+	}
 	return &Relay{
-		db:  db,
-		js:  js,
-		log: log,
+		db:        db,
+		js:        js,
+		log:       log,
+		batchSize: batchSize,
 	}, nil
 }
 
@@ -65,10 +70,10 @@ func (r *Relay) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (r *Relay) processOutbox(ctx context.Context) {
-	// Claim up to 100 unpublished events by setting claimed_until to 1 minute in the future
+	// Claim up to batchSize unpublished events by setting claimed_until to 1 minute in the future
 	// Uses SKIP LOCKED to allow multiple relayers to run concurrently without duplicate publishing
 	
-	query := `
+	query := fmt.Sprintf(`
 		UPDATE outbox_events
 		SET claimed_until = NOW() + INTERVAL '1 minute'
 		WHERE id IN (
@@ -78,10 +83,10 @@ func (r *Relay) processOutbox(ctx context.Context) {
 			  AND (claimed_until IS NULL OR claimed_until < NOW())
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
-			LIMIT 100
+			LIMIT %d
 		)
 		RETURNING id, subject, payload
-	`
+	`, r.batchSize)
 
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {

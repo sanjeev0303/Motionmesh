@@ -42,6 +42,8 @@ type Config struct {
 	DBMaxConns           int
 	DBMinConns           int
 	RateLimitEnabled     bool
+	CleanupConcurrency   int
+	OutboxBatchSize      int
 }
 
 func Load() *Config {
@@ -76,6 +78,8 @@ func Load() *Config {
 		DBMaxConns:           getEnvInt("DB_MAX_CONNS", 200),
 		DBMinConns:           getEnvInt("DB_MIN_CONNS", 20),
 		RateLimitEnabled:     getEnvBool("RATE_LIMIT_ENABLED", true),
+		CleanupConcurrency:   getEnvInt("CLEANUP_CONCURRENCY", 8),
+		OutboxBatchSize:      getEnvInt("OUTBOX_BATCH_SIZE", 100),
 	}
 }
 

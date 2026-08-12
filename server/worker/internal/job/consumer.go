@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/motionmesh/server/shared/logger"
@@ -128,7 +129,9 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	c.log.Info("Job completed successfully for video %s", payload.VideoID)
+	if rand.Intn(100) == 0 {
+		c.log.Info("Job completed successfully for video %s (sampled)", payload.VideoID)
+	}
 	msg.Ack()
 	metrics.WorkerJobsProcessedTotal.Inc()
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/motionmesh/server/api/internal/auth"
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/pagination"
 )
 
 type Handler struct {
@@ -102,6 +103,10 @@ func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request) {
 
 	objects, err := h.service.ListObjectsByBucket(r.Context(), bucketID, limit, cursor)
 	if err != nil {
+		if err == pagination.ErrInvalidCursor {
+			http.Error(w, "Invalid cursor format", http.StatusBadRequest)
+			return
+		}
 		logger.New().Error("ListObjectsByBucket failed: %v", err)
 		http.Error(w, "Failed to list objects", http.StatusInternalServerError)
 		return
@@ -114,15 +119,12 @@ func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request) {
 	var nextCursor string
 	if len(objects) == limit && len(objects) > 0 {
 		lastObj := objects[len(objects)-1]
-		c := struct {
-			UploadedAt time.Time `json:"uploaded_at"`
-			ID         string    `json:"id"`
-		}{
+		c := pagination.ObjectCursor{
 			UploadedAt: lastObj.UploadedAt,
 			ID:         lastObj.ID,
 		}
-		if b, err := json.Marshal(c); err == nil {
-			nextCursor = base64.URLEncoding.EncodeToString(b)
+		if encoded, err := pagination.EncodeCursor(c); err == nil {
+			nextCursor = encoded
 		}
 	}
 

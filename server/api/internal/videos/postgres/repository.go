@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/motionmesh/server/shared/outbox"
+	"github.com/motionmesh/server/shared/pagination"
 )
 
 type Repository struct {
@@ -41,17 +42,13 @@ func (r *Repository) ListByAccount(ctx context.Context, accountID string, extern
 	}
 
 	if cursor != "" {
-		var c struct {
-			CreatedAt time.Time `json:"created_at"`
-			ID        string    `json:"id"`
+		c, err := pagination.DecodeCursor[pagination.VideoCursor](cursor)
+		if err != nil {
+			return nil, err
 		}
-		if decoded, err := base64.URLEncoding.DecodeString(cursor); err == nil {
-			if err := json.Unmarshal(decoded, &c); err == nil {
-				query += ` AND (created_at, id) < ($` + strconv.Itoa(argIdx) + `, $` + strconv.Itoa(argIdx+1) + `)`
-				args = append(args, c.CreatedAt, c.ID)
-				argIdx += 2
-			}
-		}
+		query += ` AND (created_at, id) < ($` + strconv.Itoa(argIdx) + `, $` + strconv.Itoa(argIdx+1) + `)`
+		args = append(args, c.CreatedAt, c.ID)
+		argIdx += 2
 	}
 
 	query += ` ORDER BY created_at DESC, id DESC LIMIT $` + strconv.Itoa(argIdx)
