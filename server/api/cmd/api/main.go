@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -49,7 +50,18 @@ func main() {
 	defer cancel()
 
 	// ── Database ─────────────────────────────────────────────────────────────
-	db, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Error("database parse config: %v", err)
+		os.Exit(1)
+	}
+	dbConfig.MaxConns = int32(cfg.DBMaxConns)
+	dbConfig.MinConns = int32(cfg.DBMinConns)
+	dbConfig.MaxConnLifetime = 5 * time.Minute
+	dbConfig.MaxConnIdleTime = 2 * time.Minute
+	dbConfig.HealthCheckPeriod = 30 * time.Second
+
+	db, err := pgxpool.NewWithConfig(ctx, dbConfig)
 	if err != nil {
 		log.Error("database connect: %v", err)
 		os.Exit(1)
@@ -132,8 +144,12 @@ func main() {
 	r := chi.NewRouter()
 	
 	// Basic CORS setup
+	allowedOrigins := strings.Split(cfg.AllowedOrigins, ",")
+	for i := range allowedOrigins {
+		allowedOrigins[i] = strings.TrimSpace(allowedOrigins[i])
+	}
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:3000", "http://localhost:3001"},
+		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"*"},
 		ExposedHeaders:   []string{"Link"},
@@ -156,7 +172,7 @@ func main() {
 
 	// Protected routes — both Clerk JWT and mot_* API key are accepted
 	r.Group(func(r chi.Router) {
-		r.Use(auth.Middleware(authSvc,
+		r.Use(auth.Middleware(authSvc, cfg.LoadTestMode,
 			"/health",
 			"/v1/billing/webhook",
 			"/v1/videos/*/hls/*",
@@ -169,7 +185,7 @@ func main() {
 		})
 
 		r.Route("/v1/videos", func(r chi.Router) {
-			videosHandler := videos.NewHandler(videosSvc, storageAdapter, transcodeSvc, bucketSvc, cfg.StorageBucket)
+			videosHandler := videos.NewHandler(videosSvc, storageAdapter, transcodeSvc, bucketSvc, cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey)
 			videosHandler.RegisterRoutes(r)
 		})
 
@@ -215,14 +231,15 @@ func main() {
 		})
 	})
 
-	// ── Server ────────────────────────────────────────────────────────────────
-	// ReadTimeout and WriteTimeout are intentionally unset (0 = no timeout) so that
-	// large video proxy uploads are not killed mid-stream. Route-level timeouts can
-	// be added via http.TimeoutHandler where needed.
+	// Server timeouts configured for high-concurrency connections.
+	// Long WriteTimeout to allow proxy uploads without dropping connections.
 	srv := &http.Server{
-		Addr:        ":8080",
-		Handler:     r,
-		IdleTimeout: 60 * time.Second,
+		Addr:              ":8080",
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		WriteTimeout:      120 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {

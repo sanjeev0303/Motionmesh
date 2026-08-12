@@ -2,7 +2,7 @@ package job
 
 import (
 	"context"
-	"database/sql"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"fmt"
 	"io"
 	"os"
@@ -27,7 +27,7 @@ import (
 )
 
 type Handler struct {
-	db           *sql.DB
+	db           *pgxpool.Pool
 	store        storage.ObjectStorage
 	uploader     *uploader.Uploader
 	captions     *captions.Client
@@ -36,7 +36,7 @@ type Handler struct {
 	nc           *nats.Conn
 }
 
-func NewHandler(db *sql.DB, store storage.ObjectStorage, up *uploader.Uploader, capClient *captions.Client, brandingRepo branding.BrandingRepository, log *logger.Logger, nc *nats.Conn) *Handler {
+func NewHandler(db *pgxpool.Pool, store storage.ObjectStorage, up *uploader.Uploader, capClient *captions.Client, brandingRepo branding.BrandingRepository, log *logger.Logger, nc *nats.Conn) *Handler {
 	return &Handler{
 		db:           db,
 		store:        store,
@@ -50,21 +50,20 @@ func NewHandler(db *sql.DB, store storage.ObjectStorage, up *uploader.Uploader, 
 
 func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey string, transcodeBucketID *string) error {
 	defer func() {
-		var vStatus, cStatus sql.NullString
-		err := h.db.QueryRow("SELECT status, captions_status FROM videos WHERE id = $1::uuid", videoID).Scan(&vStatus, &cStatus)
+		var vStatus, cStatus *string
+		err := h.db.QueryRow(context.Background(), "SELECT status, captions_status FROM videos WHERE id = $1::uuid", videoID).Scan(&vStatus, &cStatus)
 		if err != nil {
 			h.log.Error("Failed to query final status for video %s: %v", videoID, err)
 			return
 		}
 		
 		statusStr := "unknown"
-		if vStatus.Valid {
-			statusStr = vStatus.String
+		if vStatus != nil {
+			statusStr = *vStatus
 		}
-		
-		cStatusStr := "skipped"
-		if cStatus.Valid {
-			cStatusStr = cStatus.String
+		cStatusStr := "unknown"
+		if cStatus != nil {
+			cStatusStr = *cStatus
 		}
 		
 		h.log.Info("Job terminated for video %s: status=%s, captions_status=%s", videoID, statusStr, cStatusStr)
@@ -77,7 +76,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	}
 
 	var bucketID string
-	if err := h.db.QueryRowContext(ctx, "SELECT bucket_id FROM videos WHERE id = $1::uuid", videoID).Scan(&bucketID); err != nil {
+	if err := h.db.QueryRow(ctx, "SELECT bucket_id FROM videos WHERE id = $1::uuid", videoID).Scan(&bucketID); err != nil {
 		return fmt.Errorf("query bucket_id: %w", err)
 	}
 	targetBucketID := bucketID
@@ -481,7 +480,7 @@ func (cw *countingWriter) Write(p []byte) (int, error) {
 
 func (h *Handler) getAccountID(ctx context.Context, videoID string) (string, error) {
 	var accountID string
-	err := h.db.QueryRowContext(ctx, "SELECT account_id FROM videos WHERE id = $1", videoID).Scan(&accountID)
+	err := h.db.QueryRow(ctx, "SELECT account_id FROM videos WHERE id = $1", videoID).Scan(&accountID)
 	return accountID, err
 }
 
@@ -532,35 +531,35 @@ func (h *Handler) saveObjectsForJob(ctx context.Context, bucketID string, object
 		sizes = append(sizes, obj.SizeBytes)
 		contentTypes = append(contentTypes, obj.ContentType)
 	}
-	_, err := h.db.ExecContext(ctx, query, bucketIDs, keys, sizes, contentTypes)
+	_, err := h.db.Exec(ctx, query, bucketIDs, keys, sizes, contentTypes)
 	return err
 }
 
 func (h *Handler) updateJobStatus(ctx context.Context, videoID string, status models.JobStatus) error {
-	_, err := h.db.ExecContext(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid", status, videoID)
+	_, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid", status, videoID)
 	if err != nil {
 		return err
 	}
 	if status == models.JobStatusProcessing {
-		_, err = h.db.ExecContext(ctx, "UPDATE videos SET status = $1::text, updated_at = now() WHERE id = $2::uuid", models.VideoStatusProcessing, videoID)
+		_, err = h.db.Exec(ctx, "UPDATE videos SET status = $1::text, updated_at = now() WHERE id = $2::uuid", models.VideoStatusProcessing, videoID)
 	}
 	return err
 }
 
 func (h *Handler) updateJobProgress(ctx context.Context, videoID string, percent int) error {
-	_, err := h.db.ExecContext(ctx, "UPDATE transcode_jobs SET progress_percent = $1::integer, updated_at = now() WHERE video_id = $2::uuid", percent, videoID)
+	_, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET progress_percent = $1::integer, updated_at = now() WHERE video_id = $2::uuid", percent, videoID)
 	return err
 }
 
 func (h *Handler) updateCaptionsStatus(ctx context.Context, videoID, status string) error {
-	_, err := h.db.ExecContext(ctx, "UPDATE videos SET captions_status = $1::text, updated_at = now() WHERE id = $2::uuid", status, videoID)
+	_, err := h.db.Exec(ctx, "UPDATE videos SET captions_status = $1::text, updated_at = now() WHERE id = $2::uuid", status, videoID)
 	return err
 }
 
 func (h *Handler) failJob(ctx context.Context, videoID string, err error) error {
 	errStr := err.Error()
-	h.db.ExecContext(ctx, "UPDATE transcode_jobs SET status = $1::text, error_msg = $2::text, updated_at = now() WHERE video_id = $3::uuid", models.JobStatusFailed, errStr, videoID)
-	h.db.ExecContext(ctx, "UPDATE videos SET status = $1::text, captions_status = CASE WHEN captions_status = 'processing' THEN 'failed' ELSE captions_status END, updated_at = now() WHERE id = $2::uuid", models.VideoStatusFailed, videoID)
+	h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, error_msg = $2::text, updated_at = now() WHERE video_id = $3::uuid", models.JobStatusFailed, errStr, videoID)
+	h.db.Exec(ctx, "UPDATE videos SET status = $1::text, captions_status = CASE WHEN captions_status = 'processing' THEN 'failed' ELSE captions_status END, updated_at = now() WHERE id = $2::uuid", models.VideoStatusFailed, videoID)
 	return err
 }
 
@@ -577,7 +576,7 @@ func (h *Handler) saveRenditions(ctx context.Context, videoID string, renditions
 		placeholders[i] = fmt.Sprintf("(gen_random_uuid(), $%d::uuid, $%d::text, $%d::text)", base+1, base+2, base+3)
 		args = append(args, videoID, r.Label, fmt.Sprintf("videos/%s/hls/stream_%s.m3u8", videoID, r.Label))
 	}
-	_, err := h.db.ExecContext(ctx,
+	_, err := h.db.Exec(ctx,
 		"INSERT INTO renditions (id, video_id, resolution, object_key) VALUES "+strings.Join(placeholders, ",")+
 			" ON CONFLICT (video_id, resolution) DO NOTHING",
 		args...,
@@ -586,7 +585,7 @@ func (h *Handler) saveRenditions(ctx context.Context, videoID string, renditions
 }
 
 func (h *Handler) saveCaptionTrack(ctx context.Context, videoID, lang, objectKey string) error {
-	_, err := h.db.ExecContext(ctx,
+	_, err := h.db.Exec(ctx,
 		`INSERT INTO caption_tracks (id, video_id, language, object_key) VALUES (gen_random_uuid(), $1::uuid, $2::text, $3::text)`,
 		videoID, lang, objectKey,
 	)
@@ -605,7 +604,7 @@ func (h *Handler) saveChapters(ctx context.Context, videoID string, chapters []m
 		placeholders[i] = fmt.Sprintf("(gen_random_uuid(), $%d::uuid, $%d::float4, $%d::text, $%d::int)", base+1, base+2, base+3, base+4)
 		args = append(args, videoID, c.StartTimeSeconds, c.Title, i)
 	}
-	_, err := h.db.ExecContext(ctx,
+	_, err := h.db.Exec(ctx,
 		"INSERT INTO chapters (id, video_id, start_time_seconds, title, position) VALUES "+strings.Join(placeholders, ","),
 		args...,
 	)
@@ -618,7 +617,7 @@ func (h *Handler) finalizeVideo(ctx context.Context, videoID string, duration fl
 	if sprite != "" { s = &sprite }
 	if preview != "" { p = &preview }
 
-	_, err := h.db.ExecContext(ctx,
+	_, err := h.db.Exec(ctx,
 		`UPDATE videos SET status = $1, duration = $2, thumbnail_key = $3, sprite_key = $4, preview_key = $5, updated_at = now() WHERE id = $6`,
 		models.VideoStatusReady, duration, t, s, p, videoID,
 	)

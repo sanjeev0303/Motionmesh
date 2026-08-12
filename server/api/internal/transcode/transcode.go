@@ -9,16 +9,22 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/outbox"
 	"github.com/nats-io/nats.go"
 )
 
 type Service struct {
 	db *pgxpool.Pool
 	nc *nats.Conn
+	js nats.JetStreamContext
 }
 
 func NewService(db *pgxpool.Pool, nc *nats.Conn) *Service {
-	return &Service{db: db, nc: nc}
+	js, err := nc.JetStream()
+	if err != nil {
+		panic(fmt.Errorf("failed to initialize JetStream context: %w", err))
+	}
+	return &Service{db: db, nc: nc, js: js}
 }
 
 type TranscodeJobMessage struct {
@@ -27,46 +33,65 @@ type TranscodeJobMessage struct {
 	TranscodeBucketID *string `json:"transcode_bucket_id,omitempty"`
 }
 
-// TriggerJob creates a job in the database and publishes a message to NATS.
+// TriggerJob creates a job in the database and publishes a message to NATS via the outbox pattern.
 func (s *Service) TriggerJob(ctx context.Context, video *models.Video) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
 	// 1. Create job in postgres idempotently to prevent race conditions
 	var jobID string
-	err := s.db.QueryRow(ctx,
-		`INSERT INTO transcode_jobs (id, video_id, status)
-		 SELECT gen_random_uuid(), $1, $2
+	err = tx.QueryRow(ctx,
+		`INSERT INTO transcode_jobs (id, video_id, status, attempt)
+		 SELECT gen_random_uuid(), $1, $2, 0
 		 WHERE NOT EXISTS (SELECT 1 FROM transcode_jobs WHERE video_id = $1)
 		 RETURNING id`,
 		video.ID, models.JobStatusQueued,
 	).Scan(&jobID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		// Job already exists — do not re-publish to avoid duplicate processing
-		return nil
-	}
-	if err != nil {
+		// Job already exists, let's see if we should retry it
+		var currentStatus string
+		var attempts int
+		err = tx.QueryRow(ctx, "SELECT id, status, attempt FROM transcode_jobs WHERE video_id = $1", video.ID).Scan(&jobID, &currentStatus, &attempts)
+		if err != nil {
+			return fmt.Errorf("failed to fetch existing job: %w", err)
+		}
+
+		// Don't restart jobs that are already queued, processing, or completed
+		if currentStatus == models.JobStatusQueued || currentStatus == models.JobStatusProcessing || currentStatus == models.JobStatusCompleted {
+			return nil
+		}
+
+		if attempts >= 3 {
+			return fmt.Errorf("max retries exceeded for transcode job %s", jobID)
+		}
+
+		// Update to retry
+		_, err = tx.Exec(ctx, "UPDATE transcode_jobs SET status = $1, attempt = attempt + 1 WHERE id = $2", models.JobStatusQueued, jobID)
+		if err != nil {
+			return fmt.Errorf("failed to update existing job for retry: %w", err)
+		}
+	} else if err != nil {
 		return fmt.Errorf("failed to create transcode job: %w", err)
 	}
 
-	// 2. Publish to NATS JetStream (only when job was freshly created)
+	// 2. Publish to NATS via outbox
 	msg := TranscodeJobMessage{
 		VideoID:           video.ID,
 		SourceObjectKey:   video.ObjectKey,
 		TranscodeBucketID: video.TranscodeBucketID,
 	}
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal transcode job msg: %w", err)
+
+	if err := outbox.InsertEvent(ctx, tx, "transcode.jobs", msg); err != nil {
+		return fmt.Errorf("failed to insert outbox event: %w", err)
 	}
 
-	js, err := s.nc.JetStream()
-	if err != nil {
-		return fmt.Errorf("failed to get jetstream context: %w", err)
-	}
-
-	// The worker listens on "transcode.jobs"
-	_, err = js.Publish("transcode.jobs", payload)
-	if err != nil {
-		return fmt.Errorf("failed to publish to NATS: %w", err)
+	// Commit transaction
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return nil

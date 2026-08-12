@@ -4,11 +4,12 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/motionmesh/server/shared/models"
 )
 
 // Entry holds the validated API key data in the local LRU.
 type Entry struct {
-	AccountID string
+	Account   *models.Account
 	KeyDigest string // SHA-256 hex of the secret portion, used to detect key rotation
 	ExpiresAt time.Time
 }
@@ -33,22 +34,22 @@ func NewLocalCache(maxEntries int) (*LocalCache, error) {
 // Get returns the cached account ID if the entry exists, is not expired, and
 // the stored digest matches the digest of the incoming key material.
 // Returns ("", false) on any miss — never errors, always falls through.
-func (c *LocalCache) Get(key, digest string) (accountID string, ok bool) {
+func (c *LocalCache) Get(key, digest string) (account *models.Account, ok bool) {
 	e, found := c.lru.Get(key)
 	if !found {
-		return "", false
+		return nil, false
 	}
 	if time.Now().After(e.ExpiresAt) || e.KeyDigest != digest {
 		c.lru.Remove(key)
-		return "", false
+		return nil, false
 	}
-	return e.AccountID, true
+	return e.Account, true
 }
 
 // Set stores a validated entry in the LRU with the given TTL.
-func (c *LocalCache) Set(key, accountID, digest string, ttl time.Duration) {
+func (c *LocalCache) Set(key string, account *models.Account, digest string, ttl time.Duration) {
 	c.lru.Add(key, Entry{
-		AccountID: accountID,
+		Account:   account,
 		KeyDigest: digest,
 		ExpiresAt: time.Now().Add(ttl),
 	})

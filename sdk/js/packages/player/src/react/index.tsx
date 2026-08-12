@@ -543,7 +543,7 @@ return motionmeshIcons;
             // makes level switches appear instant to the viewer.
             progressive: true,
             xhrSetup: (xhr: XMLHttpRequest, url: string) => {
-              if (!url.includes("token=")) {
+              if (tokenParams && !url.includes("token=")) {
                 const separator = url?.includes("?") ? "&" : "?";
                 xhr.open(
                   "GET",

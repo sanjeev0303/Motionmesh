@@ -87,9 +87,9 @@ func (r *Repository) UpsertObjects(ctx context.Context, objects []models.BucketO
 
 func (r *Repository) GetBucketUsage(ctx context.Context, bucketID string) (usedBytes int64, count int, err error) {
 	query := `
-		SELECT coalesce(sum(size_bytes), 0), count(*)
-		FROM objects
-		WHERE bucket_id = $1
+		SELECT total_bytes, total_objects
+		FROM buckets
+		WHERE id = $1
 	`
 	err = r.db.QueryRow(ctx, query, bucketID).Scan(&usedBytes, &count)
 	return

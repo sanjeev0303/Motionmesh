@@ -7,22 +7,28 @@ import (
 	"time"
 
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
+	"github.com/motionmesh/server/worker/internal/pool"
 	"github.com/nats-io/nats.go"
 )
 
 type Consumer struct {
-	nc      *nats.Conn
-	handler *Handler
-	log     *logger.Logger
+	nc          *nats.Conn
+	handler     *Handler
+	log         *logger.Logger
+	concurrency int
 }
 
-func NewConsumer(nc *nats.Conn, handler *Handler, log *logger.Logger) *Consumer {
+
+func NewConsumer(nc *nats.Conn, handler *Handler, log *logger.Logger, concurrency int) *Consumer {
 	return &Consumer{
-		nc:      nc,
-		handler: handler,
-		log:     log,
+		nc:          nc,
+		handler:     handler,
+		log:         log,
+		concurrency: concurrency,
 	}
 }
+
 
 type TranscodeJobMessage struct {
 	VideoID           string  `json:"video_id"`
@@ -64,7 +70,10 @@ func (c *Consumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to pull subscribe: %w", err)
 	}
 
-	c.log.Info("Started NATS consumer for transcode.jobs")
+	c.log.Info("Started NATS consumer for transcode.jobs with concurrency %d", c.concurrency)
+	batchSize := c.concurrency * 2
+
+	pool := pool.NewWorkerPool(c.concurrency, c.log)
 
 	for {
 		select {
@@ -72,7 +81,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 			c.log.Info("Consumer shutting down")
 			return nil
 		default:
-			msgs, err := sub.Fetch(1, nats.MaxWait(5*time.Second))
+			msgs, err := sub.Fetch(batchSize, nats.MaxWait(5*time.Second))
 			if err != nil {
 				if err != nats.ErrTimeout {
 					c.log.Error("fetch error: %v", err)
@@ -81,11 +90,22 @@ func (c *Consumer) Start(ctx context.Context) error {
 			}
 
 			for _, msg := range msgs {
-				c.handleMessage(ctx, msg)
+				m := msg // capture for goroutine
+				// Submit blocks until a worker slot is available.
+				// This acts as backpressure on Fetch.
+				err := pool.Submit(ctx, func() {
+					c.handleMessage(ctx, m)
+				})
+				if err != nil {
+					// ctx canceled while waiting for slot
+					m.Nak()
+					return err
+				}
 			}
 		}
 	}
 }
+
 
 func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 	var payload TranscodeJobMessage
@@ -104,9 +124,11 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 	if err != nil {
 		c.log.Error("job failed for video %s: %v", payload.VideoID, err)
 		msg.Term() // Terminal error, job is marked as failed in DB, don't retry automatically
+		metrics.WorkerJobsFailedTotal.Inc()
 		return
 	}
 
 	c.log.Info("Job completed successfully for video %s", payload.VideoID)
 	msg.Ack()
+	metrics.WorkerJobsProcessedTotal.Inc()
 }

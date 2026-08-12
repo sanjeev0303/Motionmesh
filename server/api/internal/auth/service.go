@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -108,11 +109,49 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 		return nil, ErrInvalidToken
 	}
 
-	// Prefer org identity for team accounts (Clerk Organizations).
+	// Caching logic for Clerk identities
+	var account *models.Account
+	var cacheKey string
+
 	if claims.ActiveOrganizationID != "" {
-		return s.repo.UpsertByClerkOrgID(ctx, claims.ActiveOrganizationID, "")
+		cacheKey = "mot:auth:clerk_org:" + claims.ActiveOrganizationID
+	} else {
+		cacheKey = "mot:auth:clerk_user:" + claims.Subject
 	}
-	return s.repo.UpsertByClerkUserID(ctx, claims.Subject, "")
+
+	// Tier 1: local LRU
+	if acc, ok := s.local.Get(cacheKey, ""); ok {
+		return acc, nil
+	}
+
+	// Tier 2: Redis
+	if acc, invalid, found := s.checkRedis(ctx, cacheKey, ""); found {
+		if invalid {
+			return nil, ErrInvalidToken
+		}
+		s.local.Set(cacheKey, acc, "", localCacheTTL)
+		return acc, nil
+	}
+
+	// Tier 3: Postgres
+	if claims.ActiveOrganizationID != "" {
+		account, err = s.repo.UpsertByClerkOrgID(ctx, claims.ActiveOrganizationID, "")
+	} else {
+		account, err = s.repo.UpsertByClerkUserID(ctx, claims.Subject, "")
+	}
+
+	if err != nil || account == nil {
+		s.cacheNegative(ctx, cacheKey)
+		return nil, ErrInvalidToken
+	}
+
+	// Populate both cache tiers on success.
+	accountJSON, _ := json.Marshal(account)
+	s.rdb.HSet(ctx, cacheKey, "account_json", string(accountJSON), "digest", "")
+	s.rdb.Expire(ctx, cacheKey, redisCacheTTL)
+	s.local.Set(cacheKey, account, "", localCacheTTL)
+
+	return account, nil
 }
 
 // ─── API Key (three-tier cache) ───────────────────────────────────────────────
@@ -143,19 +182,19 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 	cKey := cache.APIKeyKey(prefix)
 
 	// ── Tier 1: local LRU ────────────────────────────────────────────────────
-	if accountID, ok := s.local.Get(cKey, digest); ok {
+	if account, ok := s.local.Get(cKey, digest); ok {
 		trackLastUsed(s.rdb, prefix)
-		return s.accountFromID(ctx, accountID)
+		return account, nil
 	}
 
 	// ── Tier 2: Redis ─────────────────────────────────────────────────────────
-	if accountID, invalid, found := s.checkRedis(ctx, cKey, digest); found {
+	if account, invalid, found := s.checkRedis(ctx, cKey, digest); found {
 		if invalid {
 			return nil, ErrInvalidAPIKey
 		}
-		s.local.Set(cKey, accountID, digest, localCacheTTL)
+		s.local.Set(cKey, account, digest, localCacheTTL)
 		trackLastUsed(s.rdb, prefix)
-		return s.accountFromID(ctx, accountID)
+		return account, nil
 	}
 
 	// ── Tier 3: Postgres ──────────────────────────────────────────────────────
@@ -172,36 +211,41 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 	}
 
 	// Populate both cache tiers on success.
-	s.rdb.HSet(ctx, cKey, "account_id", account.ID, "digest", digest)
+	accountJSON, _ := json.Marshal(account)
+	s.rdb.HSet(ctx, cKey, "account_json", string(accountJSON), "digest", digest)
 	s.rdb.Expire(ctx, cKey, redisCacheTTL)
-	s.local.Set(cKey, account.ID, digest, localCacheTTL)
+	s.local.Set(cKey, account, digest, localCacheTTL)
 
 	trackLastUsed(s.rdb, prefix)
 	return account, nil
 }
 
 // checkRedis reads the Redis hash for a cached API key entry.
-// Returns (accountID, invalid=false, found=true)   — valid cached entry
+// Returns (account, invalid=false, found=true)   — valid cached entry
 //
-//	("", invalid=true,  found=true)   — negative cache hit
-//	("", invalid=false, found=false)  — cache miss or Redis error
-func (s *Service) checkRedis(ctx context.Context, cKey, digest string) (accountID string, invalid bool, found bool) {
+//	(nil, invalid=true,  found=true)   — negative cache hit
+//	(nil, invalid=false, found=false)  — cache miss or Redis error
+func (s *Service) checkRedis(ctx context.Context, cKey, digest string) (account *models.Account, invalid bool, found bool) {
 	data, err := s.rdb.HGetAll(ctx, cKey).Result()
 	if err != nil || len(data) == 0 {
-		return "", false, false // miss or Redis unavailable — fall through to DB
+		return nil, false, false // miss or Redis unavailable — fall through to DB
 	}
 	if data["invalid"] == "1" {
-		return "", true, true
+		return nil, true, true
 	}
 	if data["digest"] != digest {
 		// Key material changed (rotation) — treat as miss so DB re-validates.
-		return "", false, false
+		return nil, false, false
 	}
-	aid := data["account_id"]
-	if aid == "" {
-		return "", false, false
+	accJSON := data["account_json"]
+	if accJSON == "" {
+		return nil, false, false
 	}
-	return aid, false, true
+	var acc models.Account
+	if err := json.Unmarshal([]byte(accJSON), &acc); err != nil {
+		return nil, false, false // fall through to DB if unmarshal fails
+	}
+	return &acc, false, true
 }
 
 // cacheNegative writes a short-lived "invalid" marker to Redis to blunt repeated
@@ -211,15 +255,7 @@ func (s *Service) cacheNegative(ctx context.Context, cKey string) {
 	s.rdb.Expire(ctx, cKey, negativeCacheTTL)
 }
 
-// accountFromID fetches a full account by ID. Used after a cache hit when we only
-// stored the account ID (not the whole struct) to keep Redis entries small.
-func (s *Service) accountFromID(ctx context.Context, accountID string) (*models.Account, error) {
-	acc, err := s.repo.GetByID(ctx, accountID)
-	if err != nil || acc == nil {
-		return nil, ErrAccountNotFound
-	}
-	return acc, nil
-}
+
 
 // ─── Key management ───────────────────────────────────────────────────────────
 

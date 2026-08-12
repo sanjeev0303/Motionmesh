@@ -8,7 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	awss3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -138,6 +143,34 @@ func (a *S3Adapter) GetPresignedUploadURL(ctx context.Context, key, contentType 
 	return req.URL, nil
 }
 
+func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error) {
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return "", fmt.Errorf("failed to decode PEM block containing private key")
+	}
+	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		parsedKey, err8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err8 == nil {
+			if rsaKey, ok := parsedKey.(*rsa.PrivateKey); ok {
+				privKey = rsaKey
+			}
+		}
+		if privKey == nil {
+			return "", fmt.Errorf("failed to parse private key: %w", err)
+		}
+	}
+
+	signer := sign.NewURLSigner(keyID, privKey)
+	rawURL := fmt.Sprintf("https://%s/%s", domain, key)
+
+	signedURL, err := signer.Sign(rawURL, time.Now().Add(1*time.Hour))
+	if err != nil {
+		return "", fmt.Errorf("failed to sign CloudFront URL: %w", err)
+	}
+
+	return signedURL, nil
+}
 
 // CheckACL verifies required bucket permissions exist (call at startup).
 func (a *S3Adapter) CheckACL(ctx context.Context) error {

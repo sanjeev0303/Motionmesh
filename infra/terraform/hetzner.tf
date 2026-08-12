@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     hcloud = {
-      source = "hetznercloud/hcloud"
+      source  = "hetznercloud/hcloud"
       version = "~> 1.45"
     }
   }
@@ -20,7 +20,7 @@ resource "hcloud_server" "api_server" {
   image       = "ubuntu-24.04"
   server_type = "cx22"
   location    = "fsn1"
-  
+
   public_net {
     ipv4_enabled = true
     ipv6_enabled = true
@@ -32,7 +32,7 @@ resource "hcloud_server" "worker_server" {
   image       = "ubuntu-24.04"
   server_type = "cpx31"
   location    = "fsn1"
-  
+
   public_net {
     ipv4_enabled = true
     ipv6_enabled = true

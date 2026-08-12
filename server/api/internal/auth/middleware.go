@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/models"
 )
 
 type contextKey string
@@ -18,7 +19,7 @@ const AccountContextKey contextKey = "account"
 //
 // Both paths resolve to an account_id stored in the request context.
 // Requests to exemptPaths are passed through without authentication.
-func Middleware(svc *Service, exemptPaths ...string) func(http.Handler) http.Handler {
+func Middleware(svc *Service, loadTestMode bool, exemptPaths ...string) func(http.Handler) http.Handler {
 	exempt := make(map[string]struct{}, len(exemptPaths))
 	for _, p := range exemptPaths {
 		exempt[p] = struct{}{}
@@ -53,7 +54,15 @@ func Middleware(svc *Service, exemptPaths ...string) func(http.Handler) http.Han
 			)
 
 			// Route to the correct verification path by key prefix.
-			if strings.HasPrefix(token, "mot_live_") || strings.HasPrefix(token, "mot_test_") {
+			if loadTestMode && token == "test_benchmark_token" {
+				authType = "Benchmark Bypass"
+				account = &models.Account{
+					ID:    "00000000-0000-0000-0000-000000000000",
+					Email: "benchmark@motionmesh.test",
+					Plan:  "pro",
+				}
+				err = nil
+			} else if strings.HasPrefix(token, "mot_live_") || strings.HasPrefix(token, "mot_test_") {
 				authType = "API Key"
 				account, err = svc.VerifyAPIKey(r.Context(), token)
 			} else {

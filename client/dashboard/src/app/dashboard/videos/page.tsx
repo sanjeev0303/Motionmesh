@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { VideoJobRow } from "@/components/dashboard/VideoJobRow";
-import { UploadCloud } from "lucide-react";
+import { UploadCloud, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useApi } from "@/lib/api-client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -28,7 +28,7 @@ export default function VideosPage() {
   const api = useApi();
   const queryClient = useQueryClient();
 
-  const { data: serverVideos, isError } = useQuery({
+  const { data: serverVideos, isError, isLoading } = useQuery({
     queryKey: ["videos"],
     queryFn: async () => {
       const { data, error, response } = await api.GET("/v1/videos", {});
@@ -143,7 +143,12 @@ export default function VideosPage() {
         </Button>
       </div>
 
-      {isError ? (
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-24 text-center border border-border-subtle border-dashed rounded-lg bg-bg-surface">
+          <Loader2 className="w-10 h-10 animate-spin text-text-muted mb-4" />
+          <p className="text-text-muted">Loading your videos...</p>
+        </div>
+      ) : isError ? (
         <div className="flex flex-col items-center justify-center py-24 text-center border border-danger/20 border-dashed rounded-lg bg-danger/5">
           <h3 className="text-lg font-medium text-danger mb-2">Failed to load videos</h3>
           <p className="text-text-muted max-w-sm mb-6">

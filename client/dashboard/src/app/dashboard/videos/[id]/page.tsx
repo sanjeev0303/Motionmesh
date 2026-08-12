@@ -49,6 +49,7 @@ export default function VideoDetailPage({ params }: { params: { id: string } }) 
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-32 text-center">
+        <Loader2 className="w-10 h-10 animate-spin text-text-muted mb-4" />
         <p className="text-text-muted">Loading video details...</p>
       </div>
     );

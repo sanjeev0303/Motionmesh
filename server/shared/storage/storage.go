@@ -19,4 +19,5 @@ type ObjectStorage interface {
 	DeleteObject(ctx context.Context, key string) error
 	GetPresignedURL(ctx context.Context, key string) (string, error)
 	GetPresignedUploadURL(ctx context.Context, key, contentType string) (string, error)
+	GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error)
 }

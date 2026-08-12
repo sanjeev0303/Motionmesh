@@ -7,18 +7,18 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
-	"database/sql"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 
 	brandingpostgres "github.com/motionmesh/server/shared/branding/postgres"
 	"github.com/motionmesh/server/shared/config"
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/storage"
 	"github.com/motionmesh/server/worker/internal/captions"
 	"github.com/motionmesh/server/worker/internal/job"
@@ -35,17 +35,36 @@ func main() {
 	log.Info("Starting Worker on Queue: %s", cfg.QueueURL)
 
 	// ── Database ─────────────────────────────────────────────────────────────
-	db, err := sql.Open("postgres", cfg.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Error("failed to parse db config: %v", err)
+		os.Exit(1)
+	}
+	poolConfig.MaxConns = 25
+	poolConfig.MinConns = 5
+	poolConfig.MaxConnLifetime = 5 * time.Minute
+	poolConfig.MaxConnIdleTime = 2 * time.Minute
+
+	db, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		log.Error("database connect: %v", err)
 		os.Exit(1)
 	}
 	defer db.Close()
 	
-	if err := db.PingContext(ctx); err != nil {
+	if err := db.Ping(ctx); err != nil {
 		log.Error("database ping: %v", err)
 		os.Exit(1)
 	}
+
+	// ── Metrics Server ───────────────────────────────────────────────────────
+	go func() {
+		http.Handle("/metrics", metrics.Handler())
+		log.Info("Starting Prometheus metrics server on :9090")
+		if err := http.ListenAndServe(":9090", nil); err != nil {
+			log.Error("metrics server failed: %v", err)
+		}
+	}()
 
 	// ── NATS ─────────────────────────────────────────────────────────────────
 	nc, err := nats.Connect(cfg.QueueURL)
@@ -85,7 +104,12 @@ func main() {
 	capClient := captions.NewClient(cfg.CaptionsSidecarURL, &http.Client{Timeout: 30 * time.Minute})
 	
 	jobHandler := job.NewHandler(db, storageAdapter, up, capClient, brandingRepo, log, nc)
-	consumer := job.NewConsumer(nc, jobHandler, log)
+	
+	concurrency := cfg.WorkerConcurrency
+	if concurrency <= 0 {
+		concurrency = 4
+	}
+	consumer := job.NewConsumer(nc, jobHandler, log, concurrency)
 
 	// ── Start Consumer ───────────────────────────────────────────────────────
 	if err := consumer.Start(ctx); err != nil {
