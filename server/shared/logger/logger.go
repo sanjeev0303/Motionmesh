@@ -1,26 +1,49 @@
 package logger
 
 import (
-	"log"
+	"fmt"
+	"log/slog"
 	"os"
 )
 
 type Logger struct {
-	infoLog  *log.Logger
-	errorLog *log.Logger
+	logger *slog.Logger
 }
 
 func New() *Logger {
+	// Use JSON handler for structured logging, better for high throughput and log aggregation
+	handler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
 	return &Logger{
-		infoLog:  log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile),
-		errorLog: log.New(os.Stderr, "ERROR\t", log.Ldate|log.Ltime|log.LUTC|log.Lshortfile),
+		logger: slog.New(handler),
 	}
 }
 
-func (l *Logger) Info(format string, v ...interface{}) {
-	l.infoLog.Printf(format, v...)
+// Info logs an informational message. It accepts printf-style formatting.
+func (l *Logger) Info(format string, args ...any) {
+	if len(args) > 0 {
+		l.logger.Info(fmt.Sprintf(format, args...))
+	} else {
+		l.logger.Info(format)
+	}
 }
 
-func (l *Logger) Error(format string, v ...interface{}) {
-	l.errorLog.Printf(format, v...)
+// Error logs an error message. It accepts printf-style formatting.
+func (l *Logger) Error(format string, args ...any) {
+	if len(args) > 0 {
+		l.logger.Error(fmt.Sprintf(format, args...))
+	} else {
+		l.logger.Error(format)
+	}
+}
+
+// Fatal logs an error message and exits the program.
+func (l *Logger) Fatal(format string, args ...any) {
+	if len(args) > 0 {
+		l.logger.Error(fmt.Sprintf(format, args...))
+	} else {
+		l.logger.Error(format)
+	}
+	os.Exit(1)
 }

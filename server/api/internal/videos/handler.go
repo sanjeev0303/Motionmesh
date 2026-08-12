@@ -2,6 +2,7 @@ package videos
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/motionmesh/server/api/internal/auth"
@@ -39,7 +41,6 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/", h.HandleUploadInitiation)
 	r.Get("/{id}", h.HandleGetVideo)
 	r.Delete("/{id}", h.HandleDeleteVideo)
-	r.Post("/{id}/upload", h.HandleProxyUpload)
 	r.Get("/{id}/thumbnail", h.HandleGetThumbnail)
 	r.Get("/{id}/playback", h.HandleGetPlaybackInfo)
 	r.Post("/{id}/transcode", h.HandleCreateTranscodeJob)
@@ -71,8 +72,30 @@ func (h *Handler) HandleListVideos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if videos == nil {
+		videos = make([]*models.Video, 0)
+	}
+
+	var nextCursor string
+	if len(videos) == limit && len(videos) > 0 {
+		lastVideo := videos[len(videos)-1]
+		c := struct {
+			CreatedAt time.Time `json:"created_at"`
+			ID        string    `json:"id"`
+		}{
+			CreatedAt: lastVideo.CreatedAt,
+			ID:        lastVideo.ID,
+		}
+		if b, err := json.Marshal(c); err == nil {
+			nextCursor = base64.URLEncoding.EncodeToString(b)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(videos)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"videos":      videos,
+		"next_cursor": nextCursor,
+	})
 }
 
 func (h *Handler) HandleGetVideo(w http.ResponseWriter, r *http.Request) {
@@ -126,30 +149,7 @@ func (h *Handler) HandleDeleteVideo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up storage bucket files
-	keysToDelete := []string{
-		video.ObjectKey,
-	}
-	if video.ThumbnailKey != nil {
-		keysToDelete = append(keysToDelete, *video.ThumbnailKey)
-	}
-	if video.PreviewKey != nil {
-		keysToDelete = append(keysToDelete, *video.PreviewKey)
-	}
-	if video.SpriteKey != nil {
-		keysToDelete = append(keysToDelete, *video.SpriteKey)
-	}
-
-	for _, key := range keysToDelete {
-		if key != "" {
-			err := h.storage.DeleteObject(r.Context(), key)
-			if err != nil {
-				logger.New().Error("failed to delete storage key %s for video %s: %v", key, id, err)
-			}
-		}
-	}
-
-	logger.New().Info("successfully deleted video id: %s", id)
+	logger.New().Info("successfully enqueued deletion for video id: %s", id)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -214,63 +214,7 @@ func (h *Handler) HandleUploadInitiation(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-func (h *Handler) HandleProxyUpload(w http.ResponseWriter, r *http.Request) {
-	acc, ok := r.Context().Value(auth.AccountContextKey).(*models.Account)
-	if !ok || acc == nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 
-	id := chi.URLParam(r, "id")
-	video, err := h.svc.GetVideo(r.Context(), id, acc.ID)
-	if err != nil || video == nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-
-	contentType := r.Header.Get("Content-Type")
-	if contentType == "" {
-		contentType = "video/mp4"
-	}
-
-	// Use Content-Length from the request header to stream without buffering.
-	// Limit the stream to 5 GiB as a safeguard.
-	const maxSize = 5 << 30
-	size := r.ContentLength
-	if size <= 0 || size > maxSize {
-		size = maxSize
-	}
-
-	body := http.MaxBytesReader(w, r.Body, maxSize)
-
-	if err := h.storage.PutObjectStream(r.Context(), video.ObjectKey, body, size, contentType); err != nil {
-		logger.New().Error("proxy upload stream: %v", err)
-		http.Error(w, "storage upload failed", http.StatusInternalServerError)
-		return
-	}
-
-	// Record the uploaded source file in the bucket tracking table
-	objRec := []models.BucketObject{
-		{
-			BucketID:    video.BucketID,
-			Key:         video.ObjectKey,
-			SizeBytes:   size,
-			ContentType: contentType,
-		},
-	}
-	if err := h.bucketSvc.UpsertObjects(r.Context(), objRec); err != nil {
-		logger.New().Error("upsert source object to bucket tracker: %v", err)
-	}
-
-	// Trigger transcode now that the file is in storage
-	if err := h.transcodeSvc.TriggerJob(r.Context(), video); err != nil {
-		logger.New().Error("trigger transcode job: %v", err)
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "uploaded"})
-}
 
 func (h *Handler) HandleGetThumbnail(w http.ResponseWriter, r *http.Request) {
 	acc, ok := r.Context().Value(auth.AccountContextKey).(*models.Account)
@@ -318,6 +262,27 @@ func (h *Handler) HandleCreateTranscodeJob(w http.ResponseWriter, r *http.Reques
 	if video == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
+	}
+
+	// Verify the object exists in storage and get its size
+	size, err := h.storage.StatObject(ctx, video.ObjectKey)
+	if err != nil || size <= 0 {
+		logger.New().Error("stat object for transcode: %v", err)
+		http.Error(w, "file not found in storage or empty", http.StatusBadRequest)
+		return
+	}
+
+	// Record the uploaded source file in the bucket tracking table
+	objRec := []models.BucketObject{
+		{
+			BucketID:    video.BucketID,
+			Key:         video.ObjectKey,
+			SizeBytes:   size,
+			ContentType: "video/mp4",
+		},
+	}
+	if err := h.bucketSvc.UpsertObjects(ctx, objRec); err != nil {
+		logger.New().Error("upsert source object to bucket tracker: %v", err)
 	}
 
 	if err := h.transcodeSvc.TriggerJob(ctx, video); err != nil {

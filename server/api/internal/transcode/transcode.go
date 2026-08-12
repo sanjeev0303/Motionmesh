@@ -2,7 +2,6 @@ package transcode
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -53,7 +52,7 @@ func (s *Service) TriggerJob(ctx context.Context, video *models.Video) error {
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Job already exists, let's see if we should retry it
-		var currentStatus string
+		var currentStatus models.JobStatus
 		var attempts int
 		err = tx.QueryRow(ctx, "SELECT id, status, attempt FROM transcode_jobs WHERE video_id = $1", video.ID).Scan(&jobID, &currentStatus, &attempts)
 		if err != nil {

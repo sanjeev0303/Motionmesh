@@ -1,8 +1,10 @@
 package buckets
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"strconv"
 
@@ -37,14 +39,6 @@ func (h *Handler) listBuckets(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "Failed to list buckets", http.StatusInternalServerError)
 		return
-	}
-
-	for _, b := range bucketsList {
-		usedBytes, count, err := h.service.GetBucketUsage(r.Context(), b.ID)
-		if err == nil {
-			b.StorageUsedBytes = usedBytes
-			b.ObjectCount = count
-		}
 	}
 
 	// Make sure we don't return nil for empty slices for JSON consistency
@@ -117,8 +111,24 @@ func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request) {
 		objects = make([]*models.BucketObject, 0)
 	}
 
+	var nextCursor string
+	if len(objects) == limit && len(objects) > 0 {
+		lastObj := objects[len(objects)-1]
+		c := struct {
+			UploadedAt time.Time `json:"uploaded_at"`
+			ID         string    `json:"id"`
+		}{
+			UploadedAt: lastObj.UploadedAt,
+			ID:         lastObj.ID,
+		}
+		if b, err := json.Marshal(c); err == nil {
+			nextCursor = base64.URLEncoding.EncodeToString(b)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"objects": objects,
+		"objects":     objects,
+		"next_cursor": nextCursor,
 	})
 }

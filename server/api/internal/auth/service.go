@@ -19,6 +19,7 @@ import (
 	"github.com/motionmesh/server/api/internal/auth/cache"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -49,6 +50,7 @@ type Service struct {
 	cachedJWKS *clerk.JSONWebKeySet
 	rdb        *redis.Client
 	local      *cache.LocalCache
+	sf         singleflight.Group
 }
 
 func NewService(repo AccountRepository, rdb *redis.Client, secretKey, _ string) *Service {
@@ -134,16 +136,19 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 	}
 
 	// Tier 3: Postgres
-	if claims.ActiveOrganizationID != "" {
-		account, err = s.repo.UpsertByClerkOrgID(ctx, claims.ActiveOrganizationID, "")
-	} else {
-		account, err = s.repo.UpsertByClerkUserID(ctx, claims.Subject, "")
-	}
-
-	if err != nil || account == nil {
+	accI, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
+		if claims.ActiveOrganizationID != "" {
+			return s.repo.UpsertByClerkOrgID(ctx, claims.ActiveOrganizationID, "")
+		}
+		return s.repo.UpsertByClerkUserID(ctx, claims.Subject, "")
+	})
+	
+	if err != nil || accI == nil {
 		s.cacheNegative(ctx, cacheKey)
 		return nil, ErrInvalidToken
 	}
+	
+	account = accI.(*models.Account)
 
 	// Populate both cache tiers on success.
 	accountJSON, _ := json.Marshal(account)
@@ -198,8 +203,24 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 	}
 
 	// ── Tier 3: Postgres ──────────────────────────────────────────────────────
-	account, storedHash, err := s.repo.FindByAPIKeyPrefix(ctx, prefix)
-	if err != nil || account == nil {
+	type apiResult struct {
+		account *models.Account
+		hash    string
+	}
+	resI, err, _ := s.sf.Do(prefix, func() (interface{}, error) {
+		acc, storedHash, err := s.repo.FindByAPIKeyPrefix(ctx, prefix)
+		return apiResult{acc, storedHash}, err
+	})
+	if err != nil || resI == nil {
+		s.cacheNegative(ctx, cKey)
+		return nil, ErrInvalidAPIKey
+	}
+	
+	res := resI.(apiResult)
+	account := res.account
+	storedHash := res.hash
+	
+	if account == nil {
 		s.cacheNegative(ctx, cKey)
 		return nil, ErrInvalidAPIKey
 	}

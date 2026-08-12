@@ -21,11 +21,11 @@ module "eks" {
 
   eks_managed_node_groups = {
     general = {
-      min_size     = 2
-      max_size     = 5
-      desired_size = 2
+      min_size     = 3
+      max_size     = 20
+      desired_size = 3
 
-      instance_types = ["m5.large", "m5a.large"]
+      instance_types = ["c6i.2xlarge", "m6i.2xlarge"]
       capacity_type  = "ON_DEMAND"
 
       labels = {
@@ -35,11 +35,11 @@ module "eks" {
     }
 
     workers = {
-      min_size     = 2
-      max_size     = 10
-      desired_size = 2
+      min_size     = 5
+      max_size     = 50
+      desired_size = 5
 
-      instance_types = ["c5.xlarge", "c5a.xlarge"]
+      instance_types = ["c6i.4xlarge", "c6a.4xlarge"]
       capacity_type  = "SPOT"
 
       labels = {

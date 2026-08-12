@@ -20,10 +20,10 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) GetAccountByID(ctx context.Context, id string) (*models.Account, error) {
 	var acc models.Account
 	err := r.db.QueryRow(ctx,
-		`SELECT id, email, clerk_user_id, clerk_org_id, stripe_customer_id, plan, status, balance, created_at, updated_at
+		`SELECT id, email, clerk_user_id, clerk_org_id, stripe_customer_id, plan, status, balance, created_at, updated_at, total_storage_bytes, total_videos
 		 FROM accounts WHERE id = $1`,
 		id,
-	).Scan(&acc.ID, &acc.Email, &acc.ClerkUserID, &acc.ClerkOrgID, &acc.StripeCustomerID, &acc.Plan, &acc.Status, &acc.Balance, &acc.CreatedAt, &acc.UpdatedAt)
+	).Scan(&acc.ID, &acc.Email, &acc.ClerkUserID, &acc.ClerkOrgID, &acc.StripeCustomerID, &acc.Plan, &acc.Status, &acc.Balance, &acc.CreatedAt, &acc.UpdatedAt, &acc.TotalStorageBytes, &acc.TotalVideos)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -35,10 +35,10 @@ func (r *Repository) GetAccountByStripeCustomerID(ctx context.Context, customerI
 	// Wait, is there a stripe_customer_id in accounts? Let's check models.Account.
 	var acc models.Account
 	err := r.db.QueryRow(ctx,
-		`SELECT id, email, clerk_user_id, clerk_org_id, stripe_customer_id, plan, status, balance, created_at, updated_at
+		`SELECT id, email, clerk_user_id, clerk_org_id, stripe_customer_id, plan, status, balance, created_at, updated_at, total_storage_bytes, total_videos
 		 FROM accounts WHERE stripe_customer_id = $1`,
 		customerID,
-	).Scan(&acc.ID, &acc.Email, &acc.ClerkUserID, &acc.ClerkOrgID, &acc.StripeCustomerID, &acc.Plan, &acc.Status, &acc.Balance, &acc.CreatedAt, &acc.UpdatedAt)
+	).Scan(&acc.ID, &acc.Email, &acc.ClerkUserID, &acc.ClerkOrgID, &acc.StripeCustomerID, &acc.Plan, &acc.Status, &acc.Balance, &acc.CreatedAt, &acc.UpdatedAt, &acc.TotalStorageBytes, &acc.TotalVideos)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -64,6 +64,18 @@ func (r *Repository) RecordUsageEvent(ctx context.Context, event *models.UsageEv
 
 func (r *Repository) GetAggregatedUsage(ctx context.Context, accountID, eventType string) (int64, error) {
 	var total int64
+	
+	if eventType == "storage" {
+		err := r.db.QueryRow(ctx, `SELECT COALESCE(total_storage_bytes, 0) FROM accounts WHERE id = $1`, accountID).Scan(&total)
+		return total, err
+	}
+	
+	if eventType == "videos" {
+		var videosCount int
+		err := r.db.QueryRow(ctx, `SELECT COALESCE(total_videos, 0) FROM accounts WHERE id = $1`, accountID).Scan(&videosCount)
+		return int64(videosCount), err
+	}
+
 	err := r.db.QueryRow(ctx,
 		`SELECT COALESCE(SUM(quantity), 0) FROM usage_events
 		 WHERE account_id = $1 AND event_type = $2`,

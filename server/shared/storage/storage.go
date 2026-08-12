@@ -20,4 +20,5 @@ type ObjectStorage interface {
 	GetPresignedURL(ctx context.Context, key string) (string, error)
 	GetPresignedUploadURL(ctx context.Context, key, contentType string) (string, error)
 	GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error)
+	StatObject(ctx context.Context, key string) (int64, error)
 }

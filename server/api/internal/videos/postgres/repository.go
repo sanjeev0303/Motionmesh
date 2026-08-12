@@ -2,12 +2,16 @@ package postgres
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/outbox"
 )
 
 type Repository struct {
@@ -25,7 +29,7 @@ func (r *Repository) ListByAccount(ctx context.Context, accountID string, extern
 
 	query := `SELECT id, account_id, bucket_id, transcode_bucket_id, object_key, thumbnail_key, sprite_key, preview_key, title, status, captions_status, duration, size_bytes, external_user_id, created_at, updated_at
 		 FROM videos
-		 WHERE account_id = $1`
+		 WHERE account_id = $1 AND deleted_at IS NULL`
 	
 	args := []interface{}{accountID}
 	argIdx := 2
@@ -37,12 +41,20 @@ func (r *Repository) ListByAccount(ctx context.Context, accountID string, extern
 	}
 
 	if cursor != "" {
-		query += ` AND created_at < (SELECT created_at FROM videos WHERE id = $` + strconv.Itoa(argIdx) + `)`
-		args = append(args, cursor)
-		argIdx++
+		var c struct {
+			CreatedAt time.Time `json:"created_at"`
+			ID        string    `json:"id"`
+		}
+		if decoded, err := base64.URLEncoding.DecodeString(cursor); err == nil {
+			if err := json.Unmarshal(decoded, &c); err == nil {
+				query += ` AND (created_at, id) < ($` + strconv.Itoa(argIdx) + `, $` + strconv.Itoa(argIdx+1) + `)`
+				args = append(args, c.CreatedAt, c.ID)
+				argIdx += 2
+			}
+		}
 	}
 
-	query += ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(argIdx)
+	query += ` ORDER BY created_at DESC, id DESC LIMIT $` + strconv.Itoa(argIdx)
 	args = append(args, limit)
 
 	rows, err := r.db.Query(ctx, query, args...)
@@ -67,7 +79,7 @@ func (r *Repository) GetByID(ctx context.Context, id, accountID string) (*models
 	err := r.db.QueryRow(ctx,
 		`SELECT id, account_id, bucket_id, transcode_bucket_id, object_key, thumbnail_key, sprite_key, preview_key, title, status, captions_status, duration, size_bytes, external_user_id, created_at, updated_at
 		 FROM videos
-		 WHERE id = $1 AND account_id = $2`,
+		 WHERE id = $1 AND account_id = $2 AND deleted_at IS NULL`,
 		id, accountID,
 	).Scan(&v.ID, &v.AccountID, &v.BucketID, &v.TranscodeBucketID, &v.ObjectKey, &v.ThumbnailKey, &v.SpriteKey, &v.PreviewKey, &v.Title, &v.Status, &v.CaptionsStatus, &v.Duration, &v.SizeBytes, &v.ExternalUserID, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -81,7 +93,7 @@ func (r *Repository) GetPublicByID(ctx context.Context, id string) (*models.Vide
 	err := r.db.QueryRow(ctx,
 		`SELECT id, account_id, bucket_id, transcode_bucket_id, object_key, thumbnail_key, sprite_key, preview_key, title, status, captions_status, duration, size_bytes, external_user_id, created_at, updated_at
 		 FROM videos
-		 WHERE id = $1`,
+		 WHERE id = $1 AND deleted_at IS NULL`,
 		id,
 	).Scan(&v.ID, &v.AccountID, &v.BucketID, &v.TranscodeBucketID, &v.ObjectKey, &v.ThumbnailKey, &v.SpriteKey, &v.PreviewKey, &v.Title, &v.Status, &v.CaptionsStatus, &v.Duration, &v.SizeBytes, &v.ExternalUserID, &v.CreatedAt, &v.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -91,17 +103,44 @@ func (r *Repository) GetPublicByID(ctx context.Context, id string) (*models.Vide
 }
 
 func (r *Repository) Delete(ctx context.Context, id, accountID string) error {
-	tag, err := r.db.Exec(ctx,
-		`DELETE FROM videos WHERE id = $1 AND account_id = $2`,
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var video models.Video
+	err = tx.QueryRow(ctx,
+		`SELECT object_key, thumbnail_key, sprite_key, preview_key FROM videos WHERE id = $1 AND account_id = $2 AND deleted_at IS NULL`,
+		id, accountID,
+	).Scan(&video.ObjectKey, &video.ThumbnailKey, &video.SpriteKey, &video.PreviewKey)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("video not found or unauthorized")
+		}
+		return err
+	}
+
+	_, err = tx.Exec(ctx,
+		`UPDATE videos SET deleted_at = NOW() WHERE id = $1 AND account_id = $2`,
 		id, accountID,
 	)
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("video not found or unauthorized")
+
+	payload := map[string]interface{}{
+		"video_id":      id,
+		"object_key":    video.ObjectKey,
+		"thumbnail_key": video.ThumbnailKey,
+		"sprite_key":    video.SpriteKey,
+		"preview_key":   video.PreviewKey,
 	}
-	return nil
+	if err := outbox.InsertEvent(ctx, tx, "video.cleanup", payload); err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *Repository) Create(ctx context.Context, video *models.Video) (*models.Video, error) {

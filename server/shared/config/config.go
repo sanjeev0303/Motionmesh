@@ -68,13 +68,13 @@ func Load() *Config {
 		AnthropicAPIKey:    getEnv("ANTHROPIC_API_KEY", ""),
 
 		LoadTestMode:      getEnvBool("LOAD_TEST_MODE", false),
-		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 4),
+		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
 		AllowedOrigins:       getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
 		CloudFrontDomain:     getEnv("CLOUDFRONT_DOMAIN", ""),
 		CloudFrontKeyID:      getEnv("CLOUDFRONT_KEY_ID", ""),
 		CloudFrontPrivateKey: getEnv("CLOUDFRONT_PRIVATE_KEY", ""),
-		DBMaxConns:           getEnvInt("DB_MAX_CONNS", 25),
-		DBMinConns:           getEnvInt("DB_MIN_CONNS", 5),
+		DBMaxConns:           getEnvInt("DB_MAX_CONNS", 200),
+		DBMinConns:           getEnvInt("DB_MIN_CONNS", 20),
 		RateLimitEnabled:     getEnvBool("RATE_LIMIT_ENABLED", true),
 	}
 }

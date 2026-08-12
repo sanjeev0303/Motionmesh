@@ -40,7 +40,10 @@ export default function VideosPage() {
         }
         throw new Error("Failed to load videos");
       }
-      return data as unknown as Video[];
+      if (Array.isArray(data)) {
+        return data as unknown as Video[];
+      }
+      return (data as any).videos as unknown as Video[];
     },
     staleTime: 60000,
   });

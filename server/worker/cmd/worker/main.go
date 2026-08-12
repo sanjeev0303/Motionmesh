@@ -21,6 +21,7 @@ import (
 	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/storage"
 	"github.com/motionmesh/server/worker/internal/captions"
+	"github.com/motionmesh/server/worker/internal/cleanup"
 	"github.com/motionmesh/server/worker/internal/job"
 	"github.com/motionmesh/server/worker/internal/uploader"
 )
@@ -40,10 +41,11 @@ func main() {
 		log.Error("failed to parse db config: %v", err)
 		os.Exit(1)
 	}
-	poolConfig.MaxConns = 25
-	poolConfig.MinConns = 5
+	poolConfig.MaxConns = int32(cfg.DBMaxConns)
+	poolConfig.MinConns = int32(cfg.DBMinConns)
 	poolConfig.MaxConnLifetime = 5 * time.Minute
 	poolConfig.MaxConnIdleTime = 2 * time.Minute
+	poolConfig.HealthCheckPeriod = 30 * time.Second
 
 	db, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
@@ -111,7 +113,14 @@ func main() {
 	}
 	consumer := job.NewConsumer(nc, jobHandler, log, concurrency)
 
-	// ── Start Consumer ───────────────────────────────────────────────────────
+	// ── Start Consumers ──────────────────────────────────────────────────────
+	cleanupConsumer := cleanup.NewConsumer(nc, storageAdapter, log)
+	go func() {
+		if err := cleanupConsumer.Start(ctx); err != nil {
+			log.Error("cleanup consumer failed: %v", err)
+		}
+	}()
+
 	if err := consumer.Start(ctx); err != nil {
 		log.Error("consumer failed: %v", err)
 	}

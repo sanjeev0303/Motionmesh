@@ -65,30 +65,29 @@ func (r *Relay) Start(ctx context.Context, interval time.Duration) {
 }
 
 func (r *Relay) processOutbox(ctx context.Context) {
-	// Simple polling: Get up to 100 unpublished events
+	// Claim up to 100 unpublished events by setting claimed_until to 1 minute in the future
 	// Uses SKIP LOCKED to allow multiple relayers to run concurrently without duplicate publishing
 	
-	// Start a transaction
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		r.log.Error("Failed to begin outbox tx: %v", err)
-		return
-	}
-	defer tx.Rollback(ctx)
+	query := `
+		UPDATE outbox_events
+		SET claimed_until = NOW() + INTERVAL '1 minute'
+		WHERE id IN (
+			SELECT id 
+			FROM outbox_events 
+			WHERE published_at IS NULL 
+			  AND (claimed_until IS NULL OR claimed_until < NOW())
+			ORDER BY created_at ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT 100
+		)
+		RETURNING id, subject, payload
+	`
 
-	rows, err := tx.Query(ctx, `
-		SELECT id, subject, payload 
-		FROM outbox_events 
-		WHERE published_at IS NULL
-		ORDER BY created_at ASC
-		FOR UPDATE SKIP LOCKED
-		LIMIT 100
-	`)
+	rows, err := r.db.Query(ctx, query)
 	if err != nil {
-		r.log.Error("Failed to query outbox events: %v", err)
+		r.log.Error("Failed to claim outbox events: %v", err)
 		return
 	}
-	defer rows.Close()
 
 	type event struct {
 		id      string
@@ -101,33 +100,55 @@ func (r *Relay) processOutbox(ctx context.Context) {
 		var e event
 		if err := rows.Scan(&e.id, &e.subject, &e.payload); err != nil {
 			r.log.Error("Failed to scan outbox event: %v", err)
+			rows.Close()
 			return
 		}
 		events = append(events, e)
 	}
-	
-	rows.Close() // close before publishing to not hold the rows longer than necessary, tx is still holding the locks
+	rows.Close()
 
 	if len(events) == 0 {
 		return
 	}
 
+	var publishedIDs []string
+
+	// Send all publishes asynchronously to pipeline the network roundtrips
+	futures := make([]nats.PubAckFuture, 0, len(events))
+	eventMap := make(map[nats.PubAckFuture]string) // map future to event ID
+
 	for _, e := range events {
-		_, err := r.js.Publish(e.subject, e.payload)
+		f, err := r.js.PublishAsync(e.subject, e.payload)
 		if err != nil {
-			r.log.Error("Failed to publish outbox event to NATS (subject: %s): %v", e.subject, err)
-			// Break to retry later instead of marking as published
+			r.log.Error("Failed to enqueue async publish for outbox event (subject: %s): %v", e.subject, err)
 			continue
 		}
+		futures = append(futures, f)
+		eventMap[f] = e.id
+	}
 
-		// Mark as published
-		_, err = tx.Exec(ctx, `UPDATE outbox_events SET published_at = NOW() WHERE id = $1`, e.id)
-		if err != nil {
-			r.log.Error("Failed to mark outbox event as published: %v", err)
+	// Wait for all acks
+	for _, f := range futures {
+		select {
+		case <-f.Ok():
+			publishedIDs = append(publishedIDs, eventMap[f])
+		case err := <-f.Err():
+			r.log.Error("Async publish failed: %v", err)
+		case <-ctx.Done():
+			r.log.Error("Context cancelled while waiting for publish acks")
+			// Stop waiting for the rest if context is done
+			goto UpdateDB
 		}
 	}
-	
-	if err := tx.Commit(ctx); err != nil {
-		r.log.Error("Failed to commit outbox tx: %v", err)
+
+UpdateDB:
+	if len(publishedIDs) == 0 {
+		return
+	}
+
+	// Bulk update published items
+	_, err = r.db.Exec(ctx, `UPDATE outbox_events SET published_at = NOW() WHERE id = ANY($1)`, publishedIDs)
+	if err != nil {
+		r.log.Error("Failed to bulk mark outbox events as published: %v", err)
 	}
 }

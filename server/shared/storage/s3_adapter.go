@@ -172,6 +172,20 @@ func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, key
 	return signedURL, nil
 }
 
+func (a *S3Adapter) StatObject(ctx context.Context, key string) (int64, error) {
+	out, err := a.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(a.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return 0, err
+	}
+	if out.ContentLength == nil {
+		return 0, nil
+	}
+	return *out.ContentLength, nil
+}
+
 // CheckACL verifies required bucket permissions exist (call at startup).
 func (a *S3Adapter) CheckACL(ctx context.Context) error {
 	_, err := a.client.HeadBucket(ctx, &s3.HeadBucketInput{

@@ -123,7 +123,7 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 	err := c.handler.Process(jobCtx, payload.VideoID, payload.SourceObjectKey, payload.TranscodeBucketID)
 	if err != nil {
 		c.log.Error("job failed for video %s: %v", payload.VideoID, err)
-		msg.Term() // Terminal error, job is marked as failed in DB, don't retry automatically
+		msg.NakWithDelay(1 * time.Minute) // Transient/retryable error
 		metrics.WorkerJobsFailedTotal.Inc()
 		return
 	}
