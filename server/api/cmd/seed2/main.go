@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/api/internal/auth"
 	authpostgres "github.com/motionmesh/server/api/internal/auth/postgres"
+	"github.com/motionmesh/server/shared/logger"
 )
 
 func main() {
@@ -20,7 +21,7 @@ func main() {
     defer db.Close()
 
     repo := authpostgres.NewRepository(db)
-    svc := auth.NewService(repo, nil, "", "")
+    svc := auth.NewService(repo, nil, "", "", logger.New())
 
     acc, err := repo.UpsertByClerkUserID(ctx, "test_user_456_different", "")
     if err != nil {

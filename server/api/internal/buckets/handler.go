@@ -1,10 +1,8 @@
 package buckets
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"strconv"
 

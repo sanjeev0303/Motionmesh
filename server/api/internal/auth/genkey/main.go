@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/api/internal/auth"
 	authpostgres "github.com/motionmesh/server/api/internal/auth/postgres"
+	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/redis/go-redis/v9"
 )
@@ -25,7 +26,7 @@ func main() {
 	defer rdb.Close()
 
 	authRepo := authpostgres.NewRepository(db)
-	authSvc := auth.NewService(authRepo, rdb, "dummy", "dummy")
+	authSvc := auth.NewService(authRepo, rdb, "dummy", "dummy", logger.New())
 
 	// Insert dummy account
 	var acc models.Account

@@ -2,9 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"

@@ -114,7 +114,7 @@ func main() {
 
 	// ── Auth ──────────────────────────────────────────────────────────────────
 	authRepo := authpostgres.NewRepository(db)
-	authSvc := auth.NewService(authRepo, rdb, cfg.ClerkSecretKey, cfg.ClerkJWKSURL)
+	authSvc := auth.NewService(authRepo, rdb, cfg.ClerkSecretKey, cfg.ClerkJWKSURL, log)
 
 	// ── Billing ───────────────────────────────────────────────────────────────
 	var billingRepo billing.BillingRepository = billingpostgres.NewRepository(db)

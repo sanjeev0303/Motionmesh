@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/api/internal/auth"
 	authpostgres "github.com/motionmesh/server/api/internal/auth/postgres"
+	"github.com/motionmesh/server/shared/logger"
 )
 
 type OutputData struct {
@@ -37,7 +38,7 @@ func main() {
 	log.Println("Connected!")
 
 	authRepo := authpostgres.NewRepository(pool)
-	authSvc := auth.NewService(authRepo, nil, "dummy_secret", "")
+	authSvc := auth.NewService(authRepo, nil, "dummy_secret", "", logger.New())
 
 	var keys []string
 
