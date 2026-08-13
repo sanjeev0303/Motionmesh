@@ -601,15 +601,6 @@ func (h *Handler) claimJob(ctx context.Context, videoID string) error {
 	return err
 }
 
-func (h *Handler) updateJobStatus(ctx context.Context, videoID string, status models.JobStatus) error {
-	_, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid", status, videoID)
-	if err != nil {
-		return err
-	}
-	// Note: We don't update video status to 'processing' here anymore, as claimJob handles it atomically.
-	return err
-}
-
 func (h *Handler) updateJobProgress(ctx context.Context, videoID string, percent int) error {
 	_, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET progress_percent = $1::integer, updated_at = now() WHERE video_id = $2::uuid", percent, videoID)
 	return err
