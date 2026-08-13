@@ -22,8 +22,15 @@ export const options = {
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 
+const data = JSON.parse(open('./data.json'));
 const apiKeys = new SharedArray('api keys', function () {
-  return JSON.parse(open('./data.json')).api_keys;
+  return data.api_keys || ['test_token'];
+});
+const videoIds = new SharedArray('video ids', function () {
+  return data.video_ids || ['test_video'];
+});
+const bucketIds = new SharedArray('bucket ids', function () {
+  return data.bucket_ids || ['test_bucket'];
 });
 
 export function setup() {
@@ -34,39 +41,38 @@ export function setup() {
 }
 
 export default function () {
-  const apiKey = apiKeys[exec.vu.idInTest % apiKeys.length];
+  const vuIndex = exec.scenario.iterationInTest;
+  const apiKey = apiKeys[vuIndex % apiKeys.length];
+  const videoId = videoIds[vuIndex % videoIds.length];
+  const bucketId = bucketIds[vuIndex % bucketIds.length];
+  
   const params = {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
+      'X-Mock-Billing': 'true', // Exclude Stripe calls from API capacity test
     },
   };
 
   const rand = Math.random();
   if (rand < 0.30) {
-    // 30%: list videos (hot read path — should hit Redis/LRU)
     const res = http.get(`${BASE_URL}/v1/videos?limit=10`, params);
     check(res, { 'list videos 200': (r) => r.status === 200 });
   } else if (rand < 0.50) {
-    // 20%: video detail
-    const res = http.get(`${BASE_URL}/v1/videos/123`, params);
-    check(res, { 'video detail 200/404': (r) => r.status === 200 || r.status === 404 });
+    const res = http.get(`${BASE_URL}/v1/videos/${videoId}`, params);
+    check(res, { 'video detail 200': (r) => r.status === 200 });
   } else if (rand < 0.65) {
-    // 15%: playback
-    const res = http.get(`${BASE_URL}/v1/videos/123/playback`, params);
-    check(res, { 'playback 200/404': (r) => r.status === 200 || r.status === 404 });
+    const res = http.get(`${BASE_URL}/v1/videos/${videoId}/playback`, params);
+    check(res, { 'playback 200': (r) => r.status === 200 });
   } else if (rand < 0.75) {
-    // 10%: jobs
     const res = http.get(`${BASE_URL}/v1/jobs`, params);
     check(res, { 'list jobs 200': (r) => r.status === 200 });
   } else if (rand < 0.85) {
-    // 10%: buckets
     const res = http.get(`${BASE_URL}/v1/buckets`, params);
     check(res, { 'list buckets 200': (r) => r.status === 200 });
   } else if (rand < 0.90) {
-    // 5%: objects
-    const res = http.get(`${BASE_URL}/v1/buckets/123/objects`, params);
-    check(res, { 'list objects 200/404': (r) => r.status === 200 || r.status === 404 });
+    const res = http.get(`${BASE_URL}/v1/buckets/${bucketId}/objects`, params);
+    check(res, { 'list objects 200': (r) => r.status === 200 });
   } else if (rand < 0.95) {
     // 5%: branding
     const res = http.get(`${BASE_URL}/v1/branding`, params);

@@ -40,6 +40,9 @@ spec:
         envFrom:
         - secretRef:
             name: motionmesh-secrets
+        env:
+        - name: MEDIA_PROXY_MODE
+          value: "false"
         resources:
           requests:
             cpu: "2"

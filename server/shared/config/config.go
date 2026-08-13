@@ -73,7 +73,7 @@ func Load() *Config {
 
 		LoadTestMode:      getEnvBool("LOAD_TEST_MODE", false),
 		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
-		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", true),
+		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", false),
 		AllowedOrigins:    getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
 		CloudFrontDomain:     getEnv("CLOUDFRONT_DOMAIN", ""),
 		CloudFrontKeyID:      getEnv("CLOUDFRONT_KEY_ID", ""),

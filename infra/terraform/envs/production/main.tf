@@ -19,7 +19,7 @@ module "eks" {
   cluster_name    = "motionmesh-${var.environment}"
   vpc_id          = module.vpc.vpc_id
   subnet_ids      = module.vpc.private_subnets
-  cluster_version = "1.30"
+  cluster_version = var.cluster_version
 }
 
 module "aurora" {
@@ -27,7 +27,9 @@ module "aurora" {
   environment   = var.environment
   vpc_id        = module.vpc.vpc_id
   subnet_ids    = module.vpc.database_subnets
-  database_name = "motionmesh"
+  database_name  = "motionmesh"
+  engine_version = var.aurora_engine_version
+  instance_class = var.aurora_instance_class
 }
 
 module "elasticache" {

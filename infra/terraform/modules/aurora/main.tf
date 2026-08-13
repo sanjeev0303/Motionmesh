@@ -5,11 +5,14 @@ module "aurora" {
   name           = "motionmesh-${var.environment}"
   engine         = "aurora-postgresql"
   engine_version = var.engine_version
-  instance_class = var.instance_class
 
   instances = {
-    1 = {}
-    2 = {}
+    1 = {
+      instance_class = var.instance_class
+    }
+    2 = {
+      instance_class = var.instance_class
+    }
   }
 
   vpc_id                 = var.vpc_id
