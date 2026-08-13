@@ -2,15 +2,17 @@ import http from 'k6/http';
 import { check } from 'k6';
 import exec from 'k6/execution';
 
+const RPS_TARGET = __ENV.RPS_TARGET ? parseInt(__ENV.RPS_TARGET) : 16667;
+
 export const options = {
   scenarios: {
     open_model: {
       executor: 'constant-arrival-rate',
-      rate: 16667, // Target RPM / 60
+      rate: RPS_TARGET, // Target RPM / 60
       timeUnit: '1s',
       duration: '30m',
-      preAllocatedVUs: 2000,
-      maxVUs: 10000,
+      preAllocatedVUs: Math.min(2000, RPS_TARGET),
+      maxVUs: Math.min(10000, RPS_TARGET * 2),
     },
   },
 };
@@ -18,16 +20,34 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 
 // Note: k6 needs to be able to find data.json
-let data;
+let data = {};
 try {
   data = JSON.parse(open('./data.json'));
 } catch (e) {
-  data = { api_keys: ['test_token'], video_ids: ['vid_123'], buckets: ['bucket_1'], objects: ['obj_1'] };
+  throw new Error("data.json not found or invalid JSON");
 }
 
-const apiKeys = data.api_keys && data.api_keys.length > 0 ? data.api_keys : ['test_token'];
-const videoIds = data.video_ids && data.video_ids.length > 0 ? data.video_ids : ['vid_123'];
-const bucketIds = data.buckets && data.buckets.length > 0 ? data.buckets : ['bucket_1'];
+if (!data.api_keys || data.api_keys.length === 0) throw new Error("Missing api_keys in data.json");
+if (!data.video_ids || data.video_ids.length === 0) throw new Error("Missing video_ids in data.json");
+if (!data.bucket_ids || data.bucket_ids.length === 0) throw new Error("Missing bucket_ids in data.json");
+
+const apiKeys = data.api_keys;
+const videoIds = data.video_ids;
+const bucketIds = data.bucket_ids;
+
+export function setup() {
+  const res = http.get(`${BASE_URL}/health`);
+  if (res.status !== 200) {
+    throw new Error(`API is not healthy, status: ${res.status}`);
+  }
+  
+  const authRes = http.get(`${BASE_URL}/v1/videos?limit=1`, {
+    headers: { 'Authorization': `Bearer ${apiKeys[0]}` }
+  });
+  if (authRes.status !== 200) {
+    throw new Error(`Pre-flight auth check failed. Expected 200, got ${authRes.status}`);
+  }
+}
 
 export default function () {
   // Use execution ID to uniformly distribute across keys to simulate 100k distinct identities

@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // ObjectStorage is the interface the service layer depends on.
@@ -19,8 +20,8 @@ type ObjectStorage interface {
 	DeleteObject(ctx context.Context, key string) error
 	GetPresignedURL(ctx context.Context, key string) (string, error)
 	GetPresignedUploadURL(ctx context.Context, key, contentType string) (string, error)
-	GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error)
-	GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKeyPEM string) (map[string]string, error)
+	GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string, ttl time.Duration) (string, error)
+	GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKeyPEM string, ttl time.Duration) (map[string]string, error)
 	StatObject(ctx context.Context, key string) (int64, error)
 	CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error)
 	GetPresignedUploadPartURL(ctx context.Context, key, uploadID string, partNumber int) (string, error)

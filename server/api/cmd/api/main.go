@@ -195,7 +195,16 @@ func main() {
 		})
 
 		r.Route("/v1/videos", func(r chi.Router) {
-			videosHandler := videos.NewHandler(videosSvc, storageAdapter, transcodeSvc, bucketSvc, cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey, cfg.MediaProxyMode)
+			cfTTL, _ := time.ParseDuration(cfg.CloudFrontPlaybackTTL)
+			if cfTTL == 0 {
+				cfTTL = 15 * time.Minute
+			}
+			videosHandler := videos.NewHandler(
+				videosSvc, storageAdapter, transcodeSvc, bucketSvc, 
+				cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontMediaDomain, 
+				cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey, 
+				cfTTL, cfg.CookieDomain, cfg.MediaProxyMode,
+			)
 			videosHandler.RegisterRoutes(r)
 		})
 
@@ -241,15 +250,15 @@ func main() {
 		})
 	})
 
-	// Server timeouts configured for high-concurrency connections.
-	// Long WriteTimeout to allow proxy uploads without dropping connections.
+	// Server timeouts configured for high-concurrency API traffic.
+	// Media is handled out-of-band via S3 presigned URLs or CloudFront.
 	srv := &http.Server{
 		Addr:              ":8080",
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      120 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {

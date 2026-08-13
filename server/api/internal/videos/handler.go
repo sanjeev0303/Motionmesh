@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/motionmesh/server/api/internal/auth"
@@ -25,15 +26,18 @@ type Handler struct {
 	storage      storage.ObjectStorage
 	transcodeSvc *transcode.Service
 	bucketSvc    *buckets.Service
-	bucketID       string
-	cfDomain       string
+	bucketID     string
+	cfDomain     string
+	cfMediaDomain  string
 	cfKeyID        string
 	cfPrivateKey   string
+	cfPlaybackTTL  time.Duration
+	cookieDomain   string
 	mediaProxyMode bool
 }
 
-func NewHandler(svc *Service, storage storage.ObjectStorage, transcodeSvc *transcode.Service, bucketSvc *buckets.Service, bucketID, cfDomain, cfKeyID, cfPrivateKey string, mediaProxyMode bool) *Handler {
-	return &Handler{svc: svc, storage: storage, transcodeSvc: transcodeSvc, bucketSvc: bucketSvc, bucketID: bucketID, cfDomain: cfDomain, cfKeyID: cfKeyID, cfPrivateKey: cfPrivateKey, mediaProxyMode: mediaProxyMode}
+func NewHandler(svc *Service, storage storage.ObjectStorage, transcodeSvc *transcode.Service, bucketSvc *buckets.Service, bucketID, cfDomain, cfMediaDomain, cfKeyID, cfPrivateKey string, cfPlaybackTTL time.Duration, cookieDomain string, mediaProxyMode bool) *Handler {
+	return &Handler{svc: svc, storage: storage, transcodeSvc: transcodeSvc, bucketSvc: bucketSvc, bucketID: bucketID, cfDomain: cfDomain, cfMediaDomain: cfMediaDomain, cfKeyID: cfKeyID, cfPrivateKey: cfPrivateKey, cfPlaybackTTL: cfPlaybackTTL, cookieDomain: cookieDomain, mediaProxyMode: mediaProxyMode}
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -481,17 +485,17 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 	var subtitleUrl string
 	var timelineSpritesUrl string
 
-	if h.cfDomain != "" && h.cfKeyID != "" && h.cfPrivateKey != "" {
+	if h.cfDomain != "" && h.cfKeyID != "" && h.cfPrivateKey != "" && h.cfMediaDomain != "" {
 		// Use CloudFront with Signed Cookies to authorize the entire videos/{id}/* prefix
 		prefix := fmt.Sprintf("videos/%s/*", video.ID)
-		cookies, err := h.storage.GetCloudFrontSignedCookies(r.Context(), h.cfDomain, prefix, h.cfKeyID, h.cfPrivateKey)
+		cookies, err := h.storage.GetCloudFrontSignedCookies(r.Context(), h.cfDomain, prefix, h.cfKeyID, h.cfPrivateKey, h.cfPlaybackTTL)
 		if err == nil {
 			for k, v := range cookies {
 				http.SetCookie(w, &http.Cookie{
 					Name:     k,
 					Value:    v,
 					Path:     "/",
-					Domain:   h.cfDomain,
+					Domain:   h.cookieDomain,
 					Secure:   true,
 					HttpOnly: true,
 					SameSite: http.SameSiteNoneMode,
@@ -501,22 +505,22 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 			logger.New().Error("failed to generate signed cookies: %v", err)
 		}
 
-		playlistUrl = fmt.Sprintf("https://%s/videos/%s/hls/master.m3u8", h.cfDomain, video.ID)
+		playlistUrl = fmt.Sprintf("https://%s/videos/%s/hls/master.m3u8", h.cfMediaDomain, video.ID)
 		
 		if video.CaptionsStatus == "ready" {
-			subtitleUrl = fmt.Sprintf("https://%s/videos/%s/captions/en.vtt", h.cfDomain, video.ID)
+			subtitleUrl = fmt.Sprintf("https://%s/videos/%s/captions/en.vtt", h.cfMediaDomain, video.ID)
 		}
 		if video.SpriteKey != nil {
-			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfDomain, *video.SpriteKey)
+			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfMediaDomain, *video.SpriteKey)
 		}
-	} else if h.cfDomain != "" {
-		// Use CloudFront standard URLs
-		playlistUrl = fmt.Sprintf("https://%s/videos/%s/hls/master.m3u8", h.cfDomain, video.ID)
+	} else if h.cfMediaDomain != "" {
+		// Use CloudFront standard URLs without signed cookies
+		playlistUrl = fmt.Sprintf("https://%s/videos/%s/hls/master.m3u8", h.cfMediaDomain, video.ID)
 		if video.CaptionsStatus == "ready" {
-			subtitleUrl = fmt.Sprintf("https://%s/videos/%s/captions/en.vtt", h.cfDomain, video.ID)
+			subtitleUrl = fmt.Sprintf("https://%s/videos/%s/captions/en.vtt", h.cfMediaDomain, video.ID)
 		}
 		if video.SpriteKey != nil {
-			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfDomain, *video.SpriteKey)
+			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfMediaDomain, *video.SpriteKey)
 		}
 	} else if h.mediaProxyMode {
 		// Use the HLS proxy URL instead of a presigned S3 URL.

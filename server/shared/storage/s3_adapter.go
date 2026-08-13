@@ -143,7 +143,7 @@ func (a *S3Adapter) GetPresignedUploadURL(ctx context.Context, key, contentType 
 	return req.URL, nil
 }
 
-func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error) {
+func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string, ttl time.Duration) (string, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
 		return "", fmt.Errorf("failed to decode PEM block containing private key")
@@ -164,7 +164,7 @@ func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, key
 	signer := sign.NewURLSigner(keyID, privKey)
 	rawURL := fmt.Sprintf("https://%s/%s", domain, key)
 
-	signedURL, err := signer.Sign(rawURL, time.Now().Add(1*time.Hour))
+	signedURL, err := signer.Sign(rawURL, time.Now().Add(ttl))
 	if err != nil {
 		return "", fmt.Errorf("failed to sign CloudFront URL: %w", err)
 	}
@@ -172,7 +172,7 @@ func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, key
 	return signedURL, nil
 }
 
-func (a *S3Adapter) GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKeyPEM string) (map[string]string, error) {
+func (a *S3Adapter) GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKeyPEM string, ttl time.Duration) (map[string]string, error) {
 	block, _ := pem.Decode([]byte(privateKeyPEM))
 	if block == nil {
 		return nil, fmt.Errorf("failed to decode PEM block containing private key")
@@ -199,7 +199,7 @@ func (a *S3Adapter) GetCloudFrontSignedCookies(ctx context.Context, domain, pref
 			{
 				Resource: resourceURL,
 				Condition: sign.Condition{
-					DateLessThan: sign.NewAWSEpochTime(time.Now().Add(1 * time.Hour)),
+					DateLessThan: sign.NewAWSEpochTime(time.Now().Add(ttl)),
 				},
 			},
 		},

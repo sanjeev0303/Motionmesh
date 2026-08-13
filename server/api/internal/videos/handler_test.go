@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/motionmesh/server/api/internal/auth"
@@ -35,7 +36,7 @@ type mockStorage struct {
 	storage.ObjectStorage
 	getCookiesFunc func() (map[string]string, error)
 }
-func (m *mockStorage) GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKey string) (map[string]string, error) {
+func (m *mockStorage) GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKey string, ttl time.Duration) (map[string]string, error) {
 	if m.getCookiesFunc != nil {
 		return m.getCookiesFunc()
 	}
@@ -47,7 +48,7 @@ func TestHandleGetPlaybackInfo_Authorization(t *testing.T) {
 	svc := NewService(repo)
 	store := &mockStorage{}
 	
-	h := NewHandler(svc, store, nil, nil, "bucket", "cfDomain", "cfKey", "cfPrivateKey", false)
+	h := NewHandler(svc, store, nil, nil, "bucket", "cfDomain", "media.motionmesh.com", "cfKey", "cfPrivateKey", 15*time.Minute, ".motionmesh.com", false)
 
 	tests := []struct {
 		name           string

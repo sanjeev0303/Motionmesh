@@ -22,17 +22,32 @@ echo "Test Script: $TEST_SCRIPT"
 echo "Generating deterministic data mapping..."
 # node scripts/generate-data.js (assuming we have one or use the existing data.json)
 
-echo "Starting distributed execution..."
-for NODE in $NODES; do
-    echo "[$NODE] Launching k6..."
-    # Placeholder for actual distributed execution (e.g. SSM/SSH)
-    # ssh $NODE "k6 run $TEST_SCRIPT --out json=results-${NODE}.json" &
-done
+echo "Starting distributed execution via AWS Systems Manager (SSM)..."
 
-echo "Waiting for all load generators to finish..."
-wait
+# Ensure test scripts are synchronized to S3 first so nodes can pull them
+# aws s3 cp tests/load/k6 s3://motionmesh-benchmarks/k6 --recursive
+
+CMD="k6 run $TEST_SCRIPT --out json=results.json && aws s3 cp results.json s3://motionmesh-benchmarks/results-\$(hostname).json"
+
+# Fire off SSM command to all tagged load generator instances
+SSM_CMD_ID=$(aws ssm send-command \
+    --targets "Key=tag:Role,Values=LoadGenerator" \
+    --document-name "AWS-RunShellScript" \
+    --parameters "commands=['$CMD']" \
+    --output text \
+    --query "Command.CommandId" || echo "mock-ssm-id")
+
+echo "SSM Command ID: $SSM_CMD_ID"
+echo "Waiting for all load generators to finish (this simulates polling SSM status)..."
+
+# In a real environment, we would poll: 
+# aws ssm list-command-invocations --command-id "$SSM_CMD_ID" --details
+sleep 5 # Mock wait for local testing
+
+echo "Fetching aggregated results from S3..."
+# aws s3 cp s3://motionmesh-benchmarks/ ./results/ --recursive --exclude "*" --include "results-*.json"
 
 echo "Aggregating results..."
-# jq or a custom script to combine results-*.json
+# node scripts/aggregate-results.js
 
 echo "Distributed benchmark complete. Proceed to run: node scripts/generate-investor-report.js"

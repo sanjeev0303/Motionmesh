@@ -21,14 +21,15 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const MOCK_FFMPEG = __ENV.MOCK_FFMPEG || 'true'; // Configurable for orchestration tests
 
-let data;
+let data = {};
 try {
   data = JSON.parse(open('./data.json'));
 } catch (e) {
-  data = { api_keys: ['test_token'] };
+  throw new Error("data.json not found or invalid JSON");
 }
 
-const apiKeys = data.api_keys && data.api_keys.length > 0 ? data.api_keys : ['test_token'];
+if (!data.api_keys || data.api_keys.length === 0) throw new Error("Missing api_keys in data.json");
+const apiKeys = data.api_keys;
 
 export default function () {
   const vuApiKey = apiKeys[exec.scenario.iterationInTest % apiKeys.length];

@@ -3,15 +3,17 @@ import { check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 
+const RPS_TARGET = __ENV.RPS_TARGET ? parseInt(__ENV.RPS_TARGET) : 16667;
+
 export const options = {
   scenarios: {
     constant_request_rate: {
       executor: 'constant-arrival-rate',
-      rate: 16667,          // 1,000,000 / 60 ≈ 16,667 RPS
+      rate: RPS_TARGET,     // configurable RPS
       timeUnit: '1s',
       duration: '2m',       // 2-minute sustained run for steady-state measurement
-      preAllocatedVUs: 10000,
-      maxVUs: 25000,
+      preAllocatedVUs: Math.min(10000, RPS_TARGET),
+      maxVUs: Math.min(25000, RPS_TARGET * 2),
     },
   },
   thresholds: {
@@ -22,21 +24,39 @@ export const options = {
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 
-const data = JSON.parse(open('./data.json'));
+let data = {};
+try {
+  data = JSON.parse(open('./data.json'));
+} catch (e) {
+  throw new Error("data.json not found or invalid JSON");
+}
+
+if (!data.api_keys || data.api_keys.length === 0) throw new Error("Missing api_keys in data.json");
+if (!data.video_ids || data.video_ids.length === 0) throw new Error("Missing video_ids in data.json");
+if (!data.bucket_ids || data.bucket_ids.length === 0) throw new Error("Missing bucket_ids in data.json");
+
 const apiKeys = new SharedArray('api keys', function () {
-  return data.api_keys || ['test_token'];
+  return data.api_keys;
 });
 const videoIds = new SharedArray('video ids', function () {
-  return data.video_ids || ['test_video'];
+  return data.video_ids;
 });
 const bucketIds = new SharedArray('bucket ids', function () {
-  return data.bucket_ids || ['test_bucket'];
+  return data.bucket_ids;
 });
 
 export function setup() {
   const res = http.get(`${BASE_URL}/health`);
   if (res.status !== 200) {
     throw new Error(`API is not healthy, status: ${res.status}`);
+  }
+  
+  // Verify first API key works
+  const authRes = http.get(`${BASE_URL}/v1/videos?limit=1`, {
+    headers: { 'Authorization': `Bearer ${apiKeys[0]}` }
+  });
+  if (authRes.status !== 200) {
+    throw new Error(`Pre-flight auth check failed. Expected 200, got ${authRes.status}`);
   }
 }
 

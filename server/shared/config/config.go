@@ -36,17 +36,20 @@ type Config struct {
 	WorkerConcurrency int
 	MediaProxyMode    bool
 	AllowedOrigins    string
-	CloudFrontDomain     string
-	CloudFrontKeyID      string
-	CloudFrontPrivateKey string
-	DBMaxConns           int
-	DBMinConns           int
-	RateLimitEnabled     bool
-	CleanupConcurrency   int
-	OutboxBatchSize      int
-	OutboxMaxAttempts    int
-	OutboxPollIntervalMs int
-	LogSampleRate        float64
+	CloudFrontDomain      string
+	CloudFrontKeyID       string
+	CloudFrontPrivateKey  string
+	CloudFrontMediaDomain string
+	CloudFrontPlaybackTTL string
+	CookieDomain          string
+	DBMaxConns            int
+	DBMinConns            int
+	RateLimitEnabled      bool
+	CleanupConcurrency    int
+	OutboxBatchSize       int
+	OutboxMaxAttempts     int
+	OutboxPollIntervalMs  int
+	LogSampleRate         float64
 }
 
 func Load() *Config {
@@ -75,17 +78,20 @@ func Load() *Config {
 		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
 		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", false),
 		AllowedOrigins:    getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
-		CloudFrontDomain:     getEnv("CLOUDFRONT_DOMAIN", ""),
-		CloudFrontKeyID:      getEnv("CLOUDFRONT_KEY_ID", ""),
-		CloudFrontPrivateKey: getEnv("CLOUDFRONT_PRIVATE_KEY", ""),
-		DBMaxConns:           getEnvInt("DB_MAX_CONNS", 200),
-		DBMinConns:           getEnvInt("DB_MIN_CONNS", 20),
-		RateLimitEnabled:     getEnvBool("RATE_LIMIT_ENABLED", true),
-		CleanupConcurrency:   getEnvInt("CLEANUP_CONCURRENCY", 8),
-		OutboxBatchSize:      getEnvInt("OUTBOX_BATCH_SIZE", 100),
-		OutboxMaxAttempts:    getEnvInt("OUTBOX_MAX_ATTEMPTS", 5),
-		OutboxPollIntervalMs: getEnvInt("OUTBOX_POLL_INTERVAL_MS", 1000),
-		LogSampleRate:        getEnvFloat("LOG_SAMPLE_RATE", 0.05),
+		CloudFrontDomain:      getEnv("CLOUDFRONT_DOMAIN", ""),
+		CloudFrontKeyID:       getEnv("CLOUDFRONT_KEY_ID", ""),
+		CloudFrontPrivateKey:  getEnv("CLOUDFRONT_PRIVATE_KEY", ""),
+		CloudFrontMediaDomain: getEnv("CLOUDFRONT_MEDIA_DOMAIN", ""),
+		CloudFrontPlaybackTTL: getEnv("CLOUDFRONT_PLAYBACK_TTL", "15m"),
+		CookieDomain:          getEnv("COOKIE_DOMAIN", ""),
+		DBMaxConns:            getEnvInt("DB_MAX_CONNS", 200),
+		DBMinConns:            getEnvInt("DB_MIN_CONNS", 20),
+		RateLimitEnabled:      getEnvBool("RATE_LIMIT_ENABLED", true),
+		CleanupConcurrency:    getEnvInt("CLEANUP_CONCURRENCY", 8),
+		OutboxBatchSize:       getEnvInt("OUTBOX_BATCH_SIZE", 100),
+		OutboxMaxAttempts:     getEnvInt("OUTBOX_MAX_ATTEMPTS", 5),
+		OutboxPollIntervalMs:  getEnvInt("OUTBOX_POLL_INTERVAL_MS", 1000),
+		LogSampleRate:         getEnvFloat("LOG_SAMPLE_RATE", 0.05),
 	}
 }
 
