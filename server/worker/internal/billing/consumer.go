@@ -144,10 +144,20 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	concurrency := 10
+	if val := os.Getenv("STRIPE_CONCURRENCY"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil && v > 0 {
+			concurrency = v
+		}
+	}
+	sem := make(chan struct{}, concurrency)
+
 	for _, ev := range events {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(e StripeOutboxEvent) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			
 			if os.Getenv("STRIPE_MOCK_MODE") == "true" {
 				mu.Lock()
@@ -230,7 +240,13 @@ func (c *Consumer) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn) error 
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			msgs, err := sub.Fetch(10, nats.MaxWait(5*time.Second))
+			concurrency := 10
+			if val := os.Getenv("BILLING_CONCURRENCY"); val != "" {
+				if v, err := strconv.Atoi(val); err == nil && v > 0 {
+					concurrency = v
+				}
+			}
+			msgs, err := sub.Fetch(concurrency, nats.MaxWait(5*time.Second))
 			if err != nil {
 				if err != nats.ErrTimeout {
 					c.log.Error("nats fetch error: %v", err)
@@ -238,20 +254,28 @@ func (c *Consumer) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn) error 
 				continue
 			}
 
-			// Optionally could process these in parallel, but DB insertion is usually fast.
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, concurrency)
+
 			for _, msg := range msgs {
-				var ev usageEvent
-				if err := json.Unmarshal(msg.Data, &ev); err != nil {
-					c.log.Error("unmarshal usage event: %v", err)
-					msg.Term()
-					continue
-				}
+				wg.Add(1)
+				sem <- struct{}{}
+				go func(m *nats.Msg) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					
+					var ev usageEvent
+					if err := json.Unmarshal(m.Data, &ev); err != nil {
+						c.log.Error("unmarshal usage event: %v", err)
+						m.Term()
+						return
+					}
 
 				acc, err := c.getAccountCached(ctx, ev.AccountID)
 				if err != nil || acc == nil {
 					c.log.Error("failed to get account %s for usage reporting: %v", ev.AccountID, err)
-					msg.Nak()
-					continue
+					m.Nak()
+					return
 				}
 
 				qty := int64(ev.Duration)
@@ -269,23 +293,25 @@ func (c *Consumer) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn) error 
 					eventID = ev.EventID
 				} else {
 					// Fallback for older events without EventID
-					meta, metaErr := msg.Metadata()
+					meta, metaErr := m.Metadata()
 					if metaErr == nil {
 						eventID = fmt.Sprintf("nats_%s_%d", meta.Stream, meta.Sequence.Stream)
 					} else {
-						eventID = uuid.NewMD5(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s_%d", ev.VideoID, time.Now().Unix()/300))).String()
+						eventID = uuid.NewMD5(uuid.NameSpaceOID, fmt.Appendf(nil, "%s_%d", ev.VideoID, time.Now().Unix()/300)).String()
 					}
 				}
 
-				err = c.ReportUsage(ctx, eventID, ev.AccountID, "video_transcode_seconds", qty, stripeID)
-				if err != nil {
-					c.log.Error("failed to report usage for account %s: %v", ev.AccountID, err)
-					msg.Nak()
-				} else {
-					c.log.Info("Reported usage for account %s: %d seconds", ev.AccountID, qty)
-					msg.Ack()
-				}
+					err = c.ReportUsage(ctx, eventID, ev.AccountID, "video_transcode_seconds", qty, stripeID)
+					if err != nil {
+						c.log.Error("failed to report usage for account %s: %v", ev.AccountID, err)
+						m.Nak()
+					} else {
+						c.log.Info("Reported usage for account %s: %d seconds", ev.AccountID, qty)
+						m.Ack()
+					}
+				}(msg)
 			}
+			wg.Wait()
 		}
 	}
 }

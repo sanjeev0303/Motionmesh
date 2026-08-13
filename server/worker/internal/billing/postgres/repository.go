@@ -51,10 +51,10 @@ func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *model
 	defer tx.Rollback(ctx)
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO usage_events (id, account_id, event_type, quantity, metadata, created_at)
-		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, now()))
-		 ON CONFLICT (id) DO NOTHING`,
-		id, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt,
+		`INSERT INTO usage_events (id, event_id, account_id, event_type, quantity, metadata, created_at)
+		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, $6, COALESCE($7, now()))
+		 ON CONFLICT (event_id) DO NOTHING`,
+		id, event.EventID, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt,
 	)
 	if err != nil {
 		return err
@@ -67,9 +67,10 @@ func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *model
 		}
 		
 		_, err = tx.Exec(ctx,
-			`INSERT INTO stripe_outbox (account_id, stripe_customer_id, event_type, quantity, idempotency_key)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			event.AccountID, stripeCustomerID, event.EventType, event.Quantity, idempKey,
+			`INSERT INTO stripe_outbox (account_id, stripe_customer_id, event_type, quantity, idempotency_key, usage_event_id)
+			 VALUES ($1, $2, $3, $4, $5, $6)
+			 ON CONFLICT (usage_event_id) DO NOTHING`,
+			event.AccountID, stripeCustomerID, event.EventType, event.Quantity, idempKey, event.EventID,
 		)
 		if err != nil {
 			return err
@@ -82,12 +83,14 @@ func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *model
 func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, maxAttempts int) ([]billing.StripeOutboxEvent, error) {
 	query := `
 		UPDATE stripe_outbox
-		SET status = 'publishing', updated_at = NOW()
+		SET status = 'publishing', claimed_until = NOW() + INTERVAL '30 seconds', updated_at = NOW()
 		WHERE id IN (
 			SELECT id
 			FROM stripe_outbox
-			WHERE status IN ('pending', 'failed')
-			  AND next_attempt_at <= NOW()
+			WHERE (
+			    (status IN ('pending', 'failed') AND next_attempt_at <= NOW())
+			    OR (status = 'publishing' AND claimed_until < NOW())
+			)
 			  AND attempts < $1
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED

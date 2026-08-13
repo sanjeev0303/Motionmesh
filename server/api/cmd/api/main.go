@@ -99,7 +99,12 @@ func main() {
 	})
 	storageAdapter := storage.NewS3Adapter(s3Client, cfg.StorageBucket)
 	if err := storageAdapter.CheckACL(ctx); err != nil {
-		log.Error("storage bucket unreachable (continuing anyway): %v", err)
+		if os.Getenv("EXPLICIT_DEGRADED_STORAGE_MODE") == "true" {
+			log.Error("storage bucket unreachable (continuing in degraded mode): %v", err)
+		} else {
+			log.Error("storage bucket unreachable, aborting startup. Set EXPLICIT_DEGRADED_STORAGE_MODE=true to bypass: %v", err)
+			os.Exit(1)
+		}
 	}
 
 	// ── Redis ─────────────────────────────────────────────────────────────────

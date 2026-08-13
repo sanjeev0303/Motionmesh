@@ -94,8 +94,10 @@ func (r *Relay) processOutbox(ctx context.Context) {
 		WHERE id IN (
 			SELECT id
 			FROM outbox_events
-			WHERE status IN ('pending', 'failed')
-			  AND (claimed_until IS NULL OR claimed_until < NOW())
+			WHERE (
+			    (status IN ('pending', 'failed') AND (claimed_until IS NULL OR claimed_until < NOW()))
+			    OR (status = 'publishing' AND claimed_until < NOW())
+			)
 			  AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
 			  AND attempts < %d
 			ORDER BY created_at ASC
@@ -153,19 +155,34 @@ func (r *Relay) processOutbox(ctx context.Context) {
 			defer wg.Done()
 			defer func() { <-sem }() // release
 
-			// We could use PublishAsync, but with a bounded pool we can just use synchronous Publish
-			// combined with an overall context timeout if desired, or rely on NATS core timeout.
-			// The prompt allows Async but bounded in-flight is requested. Let's use Sync Publish 
-			// inside goroutines which naturally bounds in-flight publishes.
+			timeoutDuration := 5 * time.Second
+			if val := os.Getenv("OUTBOX_PUBLISH_TIMEOUT"); val != "" {
+				if d, err := time.ParseDuration(val); err == nil {
+					timeoutDuration = d
+				}
+			}
+			pubCtx, cancel := context.WithTimeout(ctx, timeoutDuration)
+			defer cancel()
 			
-			// Publish timeout can be passed via context or implicit in NATS.
-			// nats.MaxWait is typically for subscribers, for publishers it's bound by connection.
-			_, err := r.js.Publish(ev.subject, ev.payload)
+			future, err := r.js.PublishAsync(ev.subject, ev.payload)
+			var pubErr error
+			if err != nil {
+				pubErr = err
+			} else {
+				select {
+				case <-future.Ok():
+					pubErr = nil
+				case e := <-future.Err():
+					pubErr = e
+				case <-pubCtx.Done():
+					pubErr = pubCtx.Err()
+				}
+			}
 			
 			mu.Lock()
 			defer mu.Unlock()
-			if err != nil {
-				r.log.Error("Failed to publish outbox event (id: %s, subject: %s): %v", ev.id, ev.subject, err)
+			if pubErr != nil {
+				r.log.Error("Failed to publish outbox event (id: %s, subject: %s): %v", ev.id, ev.subject, pubErr)
 				failedEvents = append(failedEvents, ev)
 				errorMap[ev.id] = err.Error()
 			} else {

@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/branding"
 	"github.com/motionmesh/server/shared/logger"
@@ -414,6 +416,7 @@ func (h *Handler) writeUsageEventOutbox(ctx context.Context, accountID, videoID 
 }
 
 func (h *Handler) downloadSource(ctx context.Context, objectKey, outPath string, bucketID *string) error {
+	_ = bucketID
 	dlCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
@@ -570,13 +573,13 @@ func (h *Handler) saveObjectsForJob(ctx context.Context, bucketID string, object
 }
 
 func (h *Handler) claimJob(ctx context.Context, videoID string) error {
-	res, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid AND status = $3::text", models.JobStatusProcessing, videoID, models.JobStatusQueued)
+	var jobID string
+	err := h.db.QueryRow(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid AND status = $3::text RETURNING id", models.JobStatusProcessing, videoID, models.JobStatusQueued).Scan(&jobID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("job not found in pending state or already claimed")
+		}
 		return err
-	}
-	if res.RowsAffected() == 0 {
-		// If rows affected is 0, it means the job is either already claimed by another worker, or completed/failed.
-		return fmt.Errorf("job not found in pending state or already claimed")
 	}
 	_, err = h.db.Exec(ctx, "UPDATE videos SET status = $1::text, updated_at = now() WHERE id = $2::uuid", models.VideoStatusProcessing, videoID)
 	return err

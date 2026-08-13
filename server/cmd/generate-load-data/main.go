@@ -33,32 +33,21 @@ type Bucket struct {
 	CreatedAt time.Time
 }
 
-type Video struct {
-	ID        string
-	AccountID string
-	BucketID  string
-	ObjectKey string
-	Title     string
-	Status    string
-	Duration  float32
-	SizeBytes int64
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
 func main() {
 	var (
 		numAccounts int
 		numVideos   int
+		chunkSize   int
 	)
 
 	flag.IntVar(&numAccounts, "accounts", 100, "Number of test accounts to generate")
-	flag.IntVar(&numVideos, "videos", 1000, "Total number of test videos to generate and distribute among accounts")
+	flag.IntVar(&numVideos, "videos", 1000, "Total number of test videos to generate")
+	flag.IntVar(&chunkSize, "chunk", 10000, "Chunk size for batched COPY inserts (memory bound)")
 	flag.Parse()
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgres://postgres:postgres@localhost:5432/motionmesh?sslmode=disable" // fallback for local dev
+		dbURL = "postgres://postgres:postgres@localhost:5432/motionmesh?sslmode=disable"
 	}
 
 	ctx := context.Background()
@@ -78,126 +67,130 @@ func main() {
 		log.Fatalf("database ping: %v", err)
 	}
 
-	log.Printf("Connected to database. Generating %d accounts and %d total videos...", numAccounts, numVideos)
+	log.Printf("Connected to database. Generating %d accounts and %d total videos using chunks of %d...", numAccounts, numVideos, chunkSize)
 
 	startTime := time.Now()
 
-	// 1. Generate Accounts
-	accounts := make([]Account, numAccounts)
-	buckets := make([]Bucket, numAccounts)
-	now := time.Now()
-
-	accountRows := make([][]any, numAccounts)
-	bucketRows := make([][]any, numAccounts)
-
-	for i := 0; i < numAccounts; i++ {
-		accID := uuid.New().String()
-		accounts[i] = Account{
-			ID:               accID,
-			Email:            fmt.Sprintf("loadtest-user-%d-%s@example.com", i, accID[:8]),
-			ClerkUserID:      "user_" + accID,
-			ClerkOrgID:       "org_" + accID,
-			StripeCustomerID: "cus_" + accID[:14],
-			Plan:             "free",
-			Status:           "active",
-			CreatedAt:        now,
-			UpdatedAt:        now,
+	// 1. Generate Accounts & Buckets in chunks to avoid OOM
+	accountIDs := make([]string, 0, numAccounts)
+	bucketIDs := make([]string, 0, numAccounts)
+	
+	for i := 0; i < numAccounts; i += chunkSize {
+		end := i + chunkSize
+		if end > numAccounts {
+			end = numAccounts
 		}
-
-		accountRows[i] = []any{
-			accounts[i].ID,
-			accounts[i].Email,
-			accounts[i].ClerkUserID,
-			accounts[i].ClerkOrgID,
-			accounts[i].StripeCustomerID,
-			accounts[i].Plan,
-			accounts[i].Status,
-			accounts[i].CreatedAt,
-			accounts[i].UpdatedAt,
+		
+		batchSize := end - i
+		accountRows := make([][]any, batchSize)
+		bucketRows := make([][]any, batchSize)
+		now := time.Now()
+		
+		for j := 0; j < batchSize; j++ {
+			accID := uuid.New().String()
+			bucketID := uuid.New().String()
+			
+			accountIDs = append(accountIDs, accID)
+			bucketIDs = append(bucketIDs, bucketID)
+			
+			accountRows[j] = []any{
+				accID,
+				fmt.Sprintf("loadtest-user-%d-%s@example.com", i+j, accID[:8]),
+				"user_" + accID,
+				"org_" + accID,
+				"cus_" + accID[:14],
+				"free",
+				"active",
+				now,
+				now,
+			}
+			
+			bucketRows[j] = []any{
+				bucketID,
+				accID,
+				fmt.Sprintf("loadtest-bucket-%s", accID[:8]),
+				now,
+			}
 		}
-
-		bucketID := uuid.New().String()
-		buckets[i] = Bucket{
-			ID:        bucketID,
-			AccountID: accID,
-			Name:      fmt.Sprintf("loadtest-bucket-%s", accID[:8]),
-			CreatedAt: now,
+		
+		_, err = db.CopyFrom(
+			ctx,
+			pgx.Identifier{"accounts"},
+			[]string{"id", "email", "clerk_user_id", "clerk_org_id", "stripe_customer_id", "plan", "status", "created_at", "updated_at"},
+			pgx.CopyFromRows(accountRows),
+		)
+		if err != nil {
+			log.Fatalf("failed to insert accounts chunk: %v", err)
 		}
-
-		bucketRows[i] = []any{
-			buckets[i].ID,
-			buckets[i].AccountID,
-			buckets[i].Name,
-			buckets[i].CreatedAt,
+		
+		_, err = db.CopyFrom(
+			ctx,
+			pgx.Identifier{"buckets"},
+			[]string{"id", "account_id", "name", "created_at"},
+			pgx.CopyFromRows(bucketRows),
+		)
+		if err != nil {
+			log.Fatalf("failed to insert buckets chunk: %v", err)
 		}
+		
+		log.Printf("Inserted accounts %d to %d...", i, end)
 	}
+	
+	log.Printf("Successfully inserted %d accounts and buckets.", numAccounts)
 
-	// Insert accounts
-	_, err = db.CopyFrom(
-		ctx,
-		pgx.Identifier{"accounts"},
-		[]string{"id", "email", "clerk_user_id", "clerk_org_id", "stripe_customer_id", "plan", "status", "created_at", "updated_at"},
-		pgx.CopyFromRows(accountRows),
-	)
-	if err != nil {
-		log.Fatalf("failed to insert accounts: %v", err)
-	}
-	log.Printf("Successfully inserted %d accounts.", numAccounts)
-
-	// Insert buckets
-	_, err = db.CopyFrom(
-		ctx,
-		pgx.Identifier{"buckets"},
-		[]string{"id", "account_id", "name", "created_at"},
-		pgx.CopyFromRows(bucketRows),
-	)
-	if err != nil {
-		log.Fatalf("failed to insert buckets: %v", err)
-	}
-	log.Printf("Successfully inserted %d buckets.", numAccounts)
-
-	// 2. Generate Videos
+	// 2. Generate Videos in chunks
 	if numVideos > 0 && numAccounts > 0 {
-		videoRows := make([][]any, numVideos)
-		for i := 0; i < numVideos; i++ {
-			// Randomly assign to an account
-			idx := rand.Intn(numAccounts)
-			acc := accounts[idx]
-			bkt := buckets[idx]
-			vidID := uuid.New().String()
-
-			videoRows[i] = []any{
-				vidID,
-				acc.ID,
-				bkt.ID,
-				fmt.Sprintf("raw/%s.mp4", vidID),
-				fmt.Sprintf("Load Test Video %d", i),
-				"queued",
-				float32(rand.Intn(3600)),       // up to 1 hour
-				int64(rand.Intn(1024*1024*500)), // up to 500MB
-				now,
-				now,
-			}
-		}
-
-		// Because pgx.CopyFrom handles thousands of rows easily, we can insert all videos at once if it's not too huge (e.g. 1M rows).
-		// For very large numbers, we should chunk it. Let's chunk every 10,000 rows.
-		chunkSize := 10000
-		for i := 0; i < len(videoRows); i += chunkSize {
+		for i := 0; i < numVideos; i += chunkSize {
 			end := i + chunkSize
-			if end > len(videoRows) {
-				end = len(videoRows)
+			if end > numVideos {
+				end = numVideos
 			}
-
+			
+			batchSize := end - i
+			videoRows := make([][]any, batchSize)
+			now := time.Now()
+			
+			for j := 0; j < batchSize; j++ {
+				// Pareto distribution for realistic hot-keys (80% of videos to 20% of accounts)
+				var idx int
+				if rand.Float32() < 0.8 {
+					idx = rand.Intn(numAccounts / 5) // Hot accounts
+				} else {
+					idx = rand.Intn(numAccounts) // Any account
+				}
+				if idx >= numAccounts {
+					idx = numAccounts - 1
+				}
+				
+				accID := accountIDs[idx]
+				bktID := bucketIDs[idx]
+				vidID := uuid.New().String()
+				
+				videoRows[j] = []any{
+					vidID,
+					accID,
+					bktID,
+					fmt.Sprintf("raw/%s.mp4", vidID),
+					fmt.Sprintf("Load Test Video %d", i+j),
+					"queued",
+					float32(rand.Intn(3600)),       // up to 1 hour
+					int64(rand.Intn(1024*1024*500)), // up to 500MB
+					now,
+					now,
+				}
+			}
+			
 			_, err = db.CopyFrom(
 				ctx,
 				pgx.Identifier{"videos"},
 				[]string{"id", "account_id", "bucket_id", "object_key", "title", "status", "duration", "size_bytes", "created_at", "updated_at"},
-				pgx.CopyFromRows(videoRows[i:end]),
+				pgx.CopyFromRows(videoRows),
 			)
 			if err != nil {
 				log.Fatalf("failed to insert videos chunk %d-%d: %v", i, end, err)
 			}
+			
+			log.Printf("Inserted videos %d to %d...", i, end)
 		}
 		log.Printf("Successfully inserted %d videos.", numVideos)
 	}

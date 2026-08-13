@@ -45,8 +45,8 @@ func (s *Service) TriggerJob(ctx context.Context, video *models.Video) error {
 	var jobID string
 	err = tx.QueryRow(ctx,
 		`INSERT INTO transcode_jobs (id, video_id, status, attempt)
-		 SELECT gen_random_uuid(), $1, $2, 0
-		 WHERE NOT EXISTS (SELECT 1 FROM transcode_jobs WHERE video_id = $1)
+		 VALUES (gen_random_uuid(), $1, $2, 0)
+		 ON CONFLICT (video_id) DO NOTHING
 		 RETURNING id`,
 		video.ID, models.JobStatusQueued,
 	).Scan(&jobID)
