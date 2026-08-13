@@ -30,3 +30,9 @@ variable "instance_class" {
   type        = string
   default     = "db.r6g.large"
 }
+
+variable "allowed_security_group_ids" {
+  description = "List of security group IDs allowed to access Aurora"
+  type        = list(string)
+  default     = []
+}

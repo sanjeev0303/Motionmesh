@@ -5,22 +5,25 @@ ENVIRONMENT=${1:-benchmark}
 echo "=== Running Smoke Tests for $ENVIRONMENT ==="
 
 API_DOMAIN="api.motionmesh.com"
-if [ "$ENVIRONMENT" == "benchmark" ]; then
-    API_DOMAIN="api.motionmesh.com" # Assume this is aliased to ALB in Route53
-fi
 
-# For smoke test, we check if API resolves or if we can hit it
-# Assuming local /etc/hosts or actual DNS is setup. If not, hit ALB directly.
-cd infra/terraform/envs/$ENVIRONMENT
-ALB_HOST=$(aws elbv2 describe-load-balancers --region us-east-1 --query "LoadBalancers[0].DNSName" --output text)
+# Wait for DNS to resolve to ALB
+echo "Waiting for DNS resolution of $API_DOMAIN..."
+for i in {1..12}; do
+    RESOLVED=$(dig +short $API_DOMAIN || echo "")
+    if [[ -n "$RESOLVED" ]]; then
+        echo "✅ DNS resolved: $RESOLVED"
+        break
+    fi
+    echo "Still waiting for DNS (ExternalDNS propagation)..."
+    sleep 10
+done
 
-echo "Testing API Health Endpoint..."
-curl -s --fail http://$ALB_HOST/health || (echo "❌ API Health failed" && exit 1)
+echo "Testing API Health Endpoint (HTTPS)..."
+curl -s --fail https://$API_DOMAIN/health || (echo "❌ API Health failed" && exit 1)
 echo "✅ API Health Passed"
 
-echo "Testing API Ready Endpoint..."
-curl -s --fail http://$ALB_HOST/ready || (echo "❌ API Ready failed" && exit 1)
+echo "Testing API Ready Endpoint (HTTPS)..."
+curl -s --fail https://$API_DOMAIN/ready || (echo "❌ API Ready failed" && exit 1)
 echo "✅ API Ready Passed"
 
-# Add more mock tests or placeholder for real operations if we had a test account
 echo "Smoke Tests Complete!"

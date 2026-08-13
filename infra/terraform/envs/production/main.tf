@@ -1,10 +1,10 @@
 module "vpc" {
-  source             = "../../modules/vpc"
-  name               = "motionmesh-${var.environment}"
-  cidr               = var.vpc_cidr
-  azs                = var.availability_zones
-  public_subnets     = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
-  private_subnets    = ["10.2.4.0/24", "10.2.5.0/24", "10.2.6.0/24"]
+  source                 = "../../modules/vpc"
+  name                   = "motionmesh-${var.environment}"
+  cidr                   = var.vpc_cidr
+  azs                    = var.availability_zones
+  public_subnets         = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
+  private_subnets        = ["10.2.4.0/24", "10.2.5.0/24", "10.2.6.0/24"]
   database_subnets       = ["10.2.7.0/24", "10.2.8.0/24", "10.2.9.0/24"]
   single_nat_gateway     = false
   one_nat_gateway_per_az = true
@@ -25,20 +25,22 @@ module "eks" {
 }
 
 module "aurora" {
-  source        = "../../modules/aurora"
-  environment   = var.environment
-  vpc_id        = module.vpc.vpc_id
-  subnet_ids    = module.vpc.database_subnets
-  database_name  = "motionmesh"
-  engine_version = var.aurora_engine_version
-  instance_class = var.aurora_instance_class
+  source                     = "../../modules/aurora"
+  environment                = var.environment
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.database_subnets
+  database_name              = "motionmesh"
+  engine_version             = var.aurora_engine_version
+  instance_class             = var.aurora_instance_class
+  allowed_security_group_ids = [module.eks.node_security_group_id]
 }
 
 module "elasticache" {
-  source      = "../../modules/elasticache"
-  environment = var.environment
-  vpc_id      = module.vpc.vpc_id
-  subnet_ids  = module.vpc.database_subnets
+  source                     = "../../modules/elasticache"
+  environment                = var.environment
+  vpc_id                     = module.vpc.vpc_id
+  subnet_ids                 = module.vpc.database_subnets
+  allowed_security_group_ids = [module.eks.node_security_group_id]
 }
 
 module "s3" {
@@ -48,19 +50,19 @@ module "s3" {
 }
 
 module "cloudfront" {
-  source              = "../../modules/cloudfront"
-  environment         = var.environment
-  s3_bucket_domain               = module.s3.bucket_domain_name
-  media_domain_name              = var.media_domain_name
-  acm_certificate_arn            = var.acm_certificate_arn
-  route53_zone_id                = var.route53_zone_id
+  source                        = "../../modules/cloudfront"
+  environment                   = var.environment
+  s3_bucket_domain              = module.s3.bucket_domain_name
+  media_domain_name             = var.media_domain_name
+  acm_certificate_arn           = var.acm_certificate_arn
+  route53_zone_id               = var.route53_zone_id
   cloudfront_signing_public_key = var.cloudfront_signing_public_key
 }
 
 module "alb" {
-  source           = "../../modules/alb"
-  environment      = var.environment
-  vpc_id           = module.vpc.vpc_id
+  source      = "../../modules/alb"
+  environment = var.environment
+  vpc_id      = module.vpc.vpc_id
 }
 
 module "waf" {
@@ -69,10 +71,11 @@ module "waf" {
 }
 
 module "iam" {
-  source        = "../../modules/iam"
-  environment   = var.environment
-  cluster_name  = module.eks.cluster_id
-  s3_bucket_arn = module.s3.bucket_arn
+  source          = "../../modules/iam"
+  environment     = var.environment
+  cluster_name    = module.eks.cluster_id
+  s3_bucket_arn   = module.s3.bucket_arn
+  route53_zone_id = var.route53_zone_id
 }
 
 module "monitoring" {

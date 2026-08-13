@@ -19,7 +19,7 @@ variable "availability_zones" {
 variable "cluster_version" {
   description = "EKS cluster version"
   type        = string
-  default     = "1.32"
+  default     = "1.35"
 }
 
 variable "aurora_engine_version" {

@@ -8,10 +8,10 @@ resource "aws_security_group" "redis" {
   vpc_id      = var.vpc_id
 
   ingress {
-    from_port   = 6379
-    to_port     = 6379
-    protocol    = "tcp"
-    cidr_blocks = [data.aws_vpc.this.cidr_block]
+    from_port       = 6379
+    to_port         = 6379
+    protocol        = "tcp"
+    security_groups = var.allowed_security_group_ids
   }
 }
 
@@ -42,7 +42,7 @@ resource "aws_secretsmanager_secret" "redis" {
 }
 
 resource "aws_secretsmanager_secret_version" "redis" {
-  secret_id     = aws_secretsmanager_secret.redis.id
+  secret_id = aws_secretsmanager_secret.redis.id
   secret_string = jsonencode({
     host = aws_elasticache_replication_group.this.primary_endpoint_address
     port = aws_elasticache_replication_group.this.port

@@ -21,8 +21,8 @@ module "aurora" {
 
   create_security_group = true
   security_group_rules = {
-    vpc_ingress = {
-      cidr_blocks = [data.aws_vpc.this.cidr_block]
+    ingress_allowed_sgs = {
+      source_security_group_id = var.allowed_security_group_ids[0]
     }
   }
 

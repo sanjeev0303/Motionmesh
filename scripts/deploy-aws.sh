@@ -27,6 +27,8 @@ export VPC_ID=$(terraform output -raw vpc_id)
 export DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn)
 export AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint)
 export ALB_SG_ID=$(terraform output -raw alb_security_group_id)
+export LBC_ROLE_ARN=$(terraform output -raw lbc_role_arn)
+export EXTERNAL_DNS_ROLE_ARN=$(terraform output -raw external_dns_role_arn)
 
 export ENVIRONMENT=$ENVIRONMENT
 export STRIPE_MODE="mock"
@@ -58,6 +60,7 @@ kubectl apply -f infra/k8s/namespace.yaml
 echo "7. cluster addons (Helm)"
 helm repo add eks https://aws.github.io/eks-charts || true
 helm repo add external-secrets https://charts.external-secrets.io || true
+helm repo add bitnami https://charts.bitnami.com/bitnami || true
 helm repo update
 
 echo "7a. Install AWS Load Balancer Controller"
@@ -66,6 +69,9 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
   --set clusterName=$EKS_CLUSTER_NAME \
   --set region=$AWS_REGION \
   --set vpcId=$VPC_ID \
+  --set serviceAccount.create=true \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=$LBC_ROLE_ARN \
   --wait
 
 echo "7b. Install External Secrets Operator"
@@ -78,8 +84,29 @@ helm upgrade --install external-secrets external-secrets/external-secrets \
     --set serviceAccount.create=false \
     --wait
 
+echo "7c. Install ExternalDNS"
+# Create the service account to match Pod Identity association
+kubectl create sa external-dns -n kube-system --dry-run=client -o yaml | kubectl apply -f -
+
+helm upgrade --install external-dns bitnami/external-dns \
+  -n kube-system \
+  --set provider=aws \
+  --set aws.region=$AWS_REGION \
+  --set aws.zoneType=public \
+  --set txtOwnerId=$EKS_CLUSTER_NAME \
+  --set domainFilters[0]=motionmesh.com \
+  --set policy=sync \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=external-dns \
+  --wait
+
 echo "8. Apply External Secrets Config"
 envsubst < infra/k8s/external-secrets.yaml | kubectl apply -f -
+
+if [ "$ENVIRONMENT" == "production" ]; then
+    echo "8b. Apply Billing Secrets (Production only)"
+    envsubst < infra/k8s/billing-secrets.yaml | kubectl apply -f -
+fi
 
 echo "9. wait for External Secrets"
 kubectl wait --for=condition=Ready externalsecret/motionmesh-secrets -n motionmesh --timeout=120s

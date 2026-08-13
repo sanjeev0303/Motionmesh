@@ -15,7 +15,7 @@ module "cloudfront" {
     acm_certificate_arn      = var.acm_certificate_arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
-  } : {
+    } : {
     cloudfront_default_certificate = true
   }
 
@@ -43,7 +43,8 @@ module "cloudfront" {
     cached_methods         = ["GET", "HEAD"]
     compress               = true
     use_forwarded_values   = false
-    
+    trusted_key_groups     = [aws_cloudfront_key_group.this.id]
+
     # Signed cookies are validated at the edge. Do not forward them to S3.
     forwarded_values = {
       query_string = false

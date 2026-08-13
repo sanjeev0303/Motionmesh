@@ -13,6 +13,12 @@ module "eks" {
 
   enable_irsa = true
 
+  cluster_addons = {
+    eks-pod-identity-agent = {
+      most_recent = true
+    }
+  }
+
   eks_managed_node_group_defaults = {
     ami_type       = "AL2023_x86_64_STANDARD"
     instance_types = ["m5.large"]

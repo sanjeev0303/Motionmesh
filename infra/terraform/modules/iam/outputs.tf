@@ -17,3 +17,8 @@ output "worker_role_arn" {
   description = "ARN of IAM role for Worker pods"
   value       = aws_iam_role.worker.arn
 }
+
+output "external_dns_role_arn" {
+  description = "ARN of IAM role for ExternalDNS"
+  value       = aws_iam_role.external_dns.arn
+}

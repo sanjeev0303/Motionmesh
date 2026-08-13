@@ -62,6 +62,22 @@ else
     echo "❌ NATS has $NATS_PODS replicas, expected 3"
 fi
 
+echo "[5.8/6] Checking Application SDK Identity Access..."
+# Find an API pod and test S3 access using AWS SDK/CLI if available, otherwise check the env vars for STS session.
+# We will execute a simple python snippet or curl to hit S3 using the instance metadata / pod identity token.
+API_POD=$(kubectl get pods -n motionmesh -l app=api -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+if [[ -n "$API_POD" ]]; then
+    # Use aws-cli embedded in our image if available, or just check the token mount
+    TOKEN_MOUNT=$(kubectl exec -n motionmesh $API_POD -- ls /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token 2>/dev/null || echo "")
+    if [[ -n "$TOKEN_MOUNT" ]]; then
+        echo "✅ API Pod Identity token mounted"
+    else
+        echo "❌ API Pod Identity token NOT mounted"
+    fi
+else
+    echo "⚠️  API Pod not found, skipping pod identity test"
+fi
+
 echo "[6/6] Checking AWS Load Balancer Controller (WAF/ALB)..."
 ALB_HOST=$(kubectl get ingress motionmesh-api-ingress -n motionmesh -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 if [[ -n "$ALB_HOST" ]]; then

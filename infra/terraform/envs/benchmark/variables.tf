@@ -19,7 +19,7 @@ variable "availability_zones" {
 variable "cluster_version" {
   description = "EKS cluster version"
   type        = string
-  default     = "1.32"
+  default     = "1.35"
 }
 
 variable "aurora_engine_version" {
@@ -52,7 +52,3 @@ variable "route53_zone_id" {
   default     = ""
 }
 
-variable "cloudfront_signing_public_key" {
-  description = "PEM encoded RSA public key for CloudFront signed cookies"
-  type        = string
-}

@@ -79,5 +79,16 @@ output "aurora_master_secret_arn" {
 }
 
 output "alb_security_group_id" {
-  value = module.alb.security_group_id
+  description = "Security Group ID of the ALB"
+  value       = module.alb.security_group_id
+}
+
+output "lbc_role_arn" {
+  description = "IAM Role ARN for AWS Load Balancer Controller"
+  value       = module.iam.lbc_role_arn
+}
+
+output "external_dns_role_arn" {
+  description = "IAM Role ARN for ExternalDNS"
+  value       = module.iam.external_dns_role_arn
 }
