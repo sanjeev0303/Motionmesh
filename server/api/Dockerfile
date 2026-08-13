@@ -32,12 +32,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -trimpath \
       -ldflags="-s -w" \
       -o /bin/api \
-      ./cmd/api/main.go
+      ./cmd/api/main.go && \
+    CGO_ENABLED=0 GOOS=linux GOMEMLIMIT=512MiB GOGC=50 \
+    go build \
+      -p 2 \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /app/diagnostic \
+      ./cmd/diagnostic/main.go
 
 # ─── Stage 3: minimal runtime ────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot AS runner
 
 COPY --from=builder /bin/api /bin/api
+COPY --from=builder /app/diagnostic /app/diagnostic
 
 EXPOSE 8080
 

@@ -31,26 +31,18 @@ if [[ -z "$API_POD" || -z "$WORKER_POD" ]]; then
 fi
 
 echo "--- Testing API Pod Identity ---"
-kubectl delete pod diag-api-test -n motionmesh --ignore-not-found
-kubectl run diag-api-test --image=amazon/aws-cli -n motionmesh --overrides='{"spec": {"serviceAccountName": "motionmesh-api"}}' --restart=Never --command -- sleep 300
-kubectl wait --for=condition=Ready pod/diag-api-test -n motionmesh --timeout=60s
+echo "Asserting token file presence:"
+kubectl exec $API_POD -n motionmesh -- env | grep AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE || ((FAILURES++))
 
-echo "API Pod Identity (STS):"
-kubectl exec diag-api-test -n motionmesh -- aws sts get-caller-identity | grep "motionmesh-api-$ENVIRONMENT" || ((FAILURES++))
-echo "API Pod Identity (S3):"
-kubectl exec diag-api-test -n motionmesh -- aws s3api head-bucket --bucket $S3_BUCKET_ID || ((FAILURES++))
+echo "Running Application-Level Diagnostics in API Pod:"
+kubectl exec $API_POD -n motionmesh -- /app/diagnostic || ((FAILURES++))
 
 echo "--- Testing Worker Pod Identity ---"
-kubectl delete pod diag-worker-test -n motionmesh --ignore-not-found 2>/dev/null
-kubectl run diag-worker-test --image=amazon/aws-cli -n motionmesh --overrides='{"spec": {"serviceAccountName": "motionmesh-worker"}}' --restart=Never --command -- sleep 300
-kubectl wait --for=condition=Ready pod/diag-worker-test -n motionmesh --timeout=60s || ((FAILURES++))
+echo "Asserting token file presence:"
+kubectl exec $WORKER_POD -n motionmesh -- env | grep AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE || ((FAILURES++))
 
-echo "Worker Pod Identity (STS):"
-kubectl exec diag-worker-test -n motionmesh -- aws sts get-caller-identity | grep "motionmesh-worker-$ENVIRONMENT" || ((FAILURES++))
-echo "Worker Pod Identity (S3 Put):"
-kubectl exec diag-worker-test -n motionmesh -- aws s3api put-object --bucket $S3_BUCKET_ID --key benchmark-test/pod-identity-test.txt --body /dev/null || ((FAILURES++))
-echo "Worker Pod Identity (S3 Delete):"
-kubectl exec diag-worker-test -n motionmesh -- aws s3api delete-object --bucket $S3_BUCKET_ID --key benchmark-test/pod-identity-test.txt || ((FAILURES++))
+echo "Running Application-Level Diagnostics in Worker Pod:"
+kubectl exec $WORKER_POD -n motionmesh -- /app/diagnostic || ((FAILURES++))
 
 echo "--- Testing ESO Pod Identity ---"
 kubectl delete pod diag-eso-test -n external-secrets --ignore-not-found 2>/dev/null
@@ -67,7 +59,7 @@ echo "ExternalDNS Pod Identity (STS):"
 kubectl exec diag-dns-test -n kube-system -- aws sts get-caller-identity | grep "motionmesh-external-dns-$ENVIRONMENT" || ((FAILURES++))
 
 # Cleanup
-kubectl delete pod diag-api-test diag-worker-test -n motionmesh --ignore-not-found 2>/dev/null || true
+# Cleanup
 kubectl delete pod diag-eso-test -n external-secrets --ignore-not-found 2>/dev/null || true
 kubectl delete pod diag-dns-test -n kube-system --ignore-not-found 2>/dev/null || true
 

@@ -4,7 +4,10 @@ set -euo pipefail
 ENVIRONMENT=${1:-benchmark}
 echo "=== Running Smoke Tests for $ENVIRONMENT ==="
 
-API_DOMAIN="api.motionmesh.com"
+cd infra/terraform/envs/$ENVIRONMENT
+API_DOMAIN=$(terraform output -raw api_domain_name)
+cd ../../../../
+
 
 # Wait for DNS to resolve to ALB
 echo "Waiting for DNS resolution of $API_DOMAIN..."

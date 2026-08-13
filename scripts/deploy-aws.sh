@@ -48,7 +48,8 @@ fi
 export ALLOWED_ORIGINS="https://dashboard.motionmesh.com"
 export CLOUDFRONT_MEDIA_DOMAIN="media.motionmesh.com"
 export COOKIE_DOMAIN=".motionmesh.com"
-export API_DOMAIN="api.motionmesh.com"
+export API_DOMAIN=$(terraform output -raw api_domain_name)
+export ROUTE53_ZONE_ID=$(terraform output -raw route53_zone_id)
 
 export GIT_SHA=$(git rev-parse --short HEAD)
 
@@ -148,6 +149,11 @@ docker push $API_IMAGE_URI:$GIT_SHA
 docker build -t motionmesh-worker -f server/worker/Dockerfile .
 docker tag motionmesh-worker $WORKER_IMAGE_URI:$GIT_SHA
 docker push $WORKER_IMAGE_URI:$GIT_SHA
+
+# Diagnostic
+docker build -t motionmesh-diagnostic -f infra/docker/diagnostic/Dockerfile .
+docker tag motionmesh-diagnostic $API_IMAGE_URI:diagnostic-$GIT_SHA
+docker push $API_IMAGE_URI:diagnostic-$GIT_SHA
 
 export MIGRATION_IMAGE_URI="$API_IMAGE_URI:$GIT_SHA"
 

@@ -21,6 +21,7 @@ FROM deps AS builder
 
 COPY shared/ shared/
 COPY worker/ worker/
+COPY api/ api/
 
 # Cache both module cache and the Go build cache (compiled pkgs)
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -32,7 +33,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       -trimpath \
       -ldflags="-s -w" \
       -o /bin/worker \
-      ./cmd/worker/main.go
+      ./cmd/worker/main.go && \
+    cd ../api && \
+    CGO_ENABLED=0 GOOS=linux GOMEMLIMIT=512MiB GOGC=50 \
+    go build \
+      -p 2 \
+      -trimpath \
+      -ldflags="-s -w" \
+      -o /app/diagnostic \
+      ./cmd/diagnostic/main.go
 
 # ─── Stage 3: runtime with FFmpeg ────────────────────────────────────────────
 FROM alpine:3.20 AS runner
@@ -42,6 +51,7 @@ RUN --mount=type=cache,target=/var/cache/apk \
     adduser -D -H -u 1001 appuser
 
 COPY --from=builder /bin/worker /bin/worker
+COPY --from=builder /app/diagnostic /app/diagnostic
 
 USER appuser
 

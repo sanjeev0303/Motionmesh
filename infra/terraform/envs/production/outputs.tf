@@ -92,3 +92,11 @@ output "external_dns_role_arn" {
   description = "IAM Role ARN for ExternalDNS"
   value       = module.iam.external_dns_role_arn
 }
+
+output "api_domain_name" {
+  value = var.api_domain_name
+}
+
+output "route53_zone_id" {
+  value = var.route53_zone_id
+}

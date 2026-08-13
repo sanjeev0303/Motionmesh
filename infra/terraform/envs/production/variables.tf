@@ -64,6 +64,16 @@ variable "route53_zone_id" {
   }
 }
 
+variable "api_domain_name" {
+  description = "The custom API domain name (e.g., api.motionmesh.com)"
+  type        = string
+  
+  validation {
+    condition     = length(var.api_domain_name) > 0
+    error_message = "api_domain_name must not be empty."
+  }
+}
+
 variable "cloudfront_signing_public_key" {
   description = "PEM encoded RSA public key for CloudFront signed cookies"
   type        = string

@@ -64,3 +64,13 @@ variable "route53_zone_id" {
   }
 }
 
+variable "api_domain_name" {
+  description = "The custom API domain name (e.g., api.motionmesh.com)"
+  type        = string
+  
+  validation {
+    condition     = length(var.api_domain_name) > 0
+    error_message = "api_domain_name must not be empty."
+  }
+}
+
