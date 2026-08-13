@@ -143,6 +143,10 @@ func main() {
 	}()
 	
 	go func() {
+		billingConsumer.StartStripeRelay(ctx, 5*time.Second)
+	}()
+
+	go func() {
 		if err := billingConsumer.ConsumeUsageEvents(ctx, nc); err != nil {
 			log.Error("billing consumer failed: %v", err)
 		}

@@ -18,9 +18,22 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+type StripeOutboxEvent struct {
+	ID               string
+	AccountID        string
+	StripeCustomerID string
+	EventType        string
+	Quantity         int64
+	IdempotencyKey   string
+	Attempts         int
+}
+
 type Repository interface {
 	GetAccountByID(ctx context.Context, id string) (*models.Account, error)
-	RecordUsageEvent(ctx context.Context, event *models.UsageEvent) error
+	RecordUsageAndStripeEvent(ctx context.Context, event *models.UsageEvent, stripeCustomerID string) error
+	ClaimStripeOutboxEvents(ctx context.Context, batchSize, maxAttempts int) ([]StripeOutboxEvent, error)
+	MarkStripeEventsPublished(ctx context.Context, ids []string) error
+	MarkStripeEventFailed(ctx context.Context, id string, attempts, maxAttempts int, errStr string) error
 }
 
 type cachedAccount struct {
@@ -33,23 +46,10 @@ type Consumer struct {
 	stripeSecretKey string
 	log             *logger.Logger
 	
-	// Stripe bounded worker pool
-	stripeJobs chan stripeJob
-	wg         sync.WaitGroup
-
 	// Account cache
 	accCache map[string]cachedAccount
 	accMu    sync.RWMutex
 	accSF    singleflight.Group
-}
-
-type stripeJob struct {
-	AccountID        string
-	StripeCustomerID string
-	EventType        string
-	Quantity         int64
-	EventID          string
-	Attempt          int
 }
 
 func NewConsumer(repo Repository, stripeSecretKey string, log *logger.Logger) *Consumer {
@@ -59,29 +59,14 @@ func NewConsumer(repo Repository, stripeSecretKey string, log *logger.Logger) *C
 		repo:            repo,
 		stripeSecretKey: stripeSecretKey,
 		log:             log,
-		stripeJobs:      make(chan stripeJob, 1000),
 		accCache:        make(map[string]cachedAccount),
-	}
-	
-	concurrency := 10
-	if val := os.Getenv("STRIPE_WORKER_CONCURRENCY"); val != "" {
-		if c, err := strconv.Atoi(val); err == nil && c > 0 {
-			concurrency = c
-		}
-	}
-	
-	c.log.Info("Starting %d Stripe bounded workers", concurrency)
-	for i := 0; i < concurrency; i++ {
-		c.wg.Add(1)
-		go c.stripeWorker(i)
 	}
 	
 	return c
 }
 
 func (c *Consumer) Stop() {
-	close(c.stripeJobs)
-	c.wg.Wait()
+	// Any future cleanups
 }
 
 func (c *Consumer) getAccountCached(ctx context.Context, accountID string) (*models.Account, error) {
@@ -121,46 +106,88 @@ func (c *Consumer) getAccountCached(ctx context.Context, accountID string) (*mod
 	return v.(*models.Account), nil
 }
 
-func (c *Consumer) stripeWorker(id int) {
-	defer c.wg.Done()
-	
-	for job := range c.stripeJobs {
-		// Respect mock mode for load testing
-		if os.Getenv("STRIPE_MOCK_MODE") == "true" {
-			continue // simulate success
-		}
+func (c *Consumer) StartStripeRelay(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 
-		params := &stripe.BillingMeterEventParams{
-			EventName: stripe.String(job.EventType),
-			Payload: map[string]string{
-				"stripe_customer_id": job.StripeCustomerID,
-				"value":              fmt.Sprintf("%d", job.Quantity),
-			},
+	batchSize := 50
+	maxAttempts := 5
+	if val := os.Getenv("STRIPE_OUTBOX_MAX_ATTEMPTS"); val != "" {
+		if v, err := strconv.Atoi(val); err == nil && v > 0 {
+			maxAttempts = v
 		}
-		
-		// Optional idempotency key (if Stripe SDK allows it on MeterEvent)
-		// params.IdempotencyKey = stripe.String(job.EventID)
+	}
 
-		_, err := meterevent.New(params)
-		if err != nil {
-			c.log.Error("stripe worker %d: failed to report meter event %s for %s (attempt %d): %v", id, job.EventType, job.AccountID, job.Attempt, err)
-			
-			// Simple backoff retry (up to 3 attempts in memory)
-			if job.Attempt < 3 {
-				job.Attempt++
-				go func(j stripeJob) {
-					time.Sleep(time.Duration(j.Attempt*2) * time.Second)
-					c.stripeJobs <- j
-				}(job)
-			} else {
-				// Record dead-letter / failure state (could insert into a DB table)
-				c.log.Error("stripe worker %d: permanently failed meter event %s for %s", id, job.EventType, job.AccountID)
-			}
+	for {
+		select {
+		case <-ctx.Done():
+			c.log.Info("Stripe outbox relay shutting down")
+			return
+		case <-ticker.C:
+			c.processStripeOutbox(ctx, batchSize, maxAttempts)
 		}
 	}
 }
 
-// ReportUsage writes to usage_events (source of truth) and queues a Stripe Meter Event.
+func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttempts int) {
+	events, err := c.repo.ClaimStripeOutboxEvents(ctx, batchSize, maxAttempts)
+	if err != nil {
+		c.log.Error("Failed to claim stripe outbox events: %v", err)
+		return
+	}
+
+	if len(events) == 0 {
+		return
+	}
+
+	var publishedIDs []string
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, ev := range events {
+		wg.Add(1)
+		go func(e StripeOutboxEvent) {
+			defer wg.Done()
+			
+			if os.Getenv("STRIPE_MOCK_MODE") == "true" {
+				mu.Lock()
+				publishedIDs = append(publishedIDs, e.ID)
+				mu.Unlock()
+				return
+			}
+
+			params := &stripe.BillingMeterEventParams{
+				EventName: stripe.String(e.EventType),
+				Payload: map[string]string{
+					"stripe_customer_id": e.StripeCustomerID,
+					"value":              fmt.Sprintf("%d", e.Quantity),
+				},
+			}
+			
+			_, apiErr := meterevent.New(params)
+			
+			if apiErr != nil {
+				c.log.Error("Stripe outbox failed to report meter event %s for %s (attempt %d): %v", e.EventType, e.AccountID, e.Attempts, apiErr)
+				if dbErr := c.repo.MarkStripeEventFailed(ctx, e.ID, e.Attempts, maxAttempts, apiErr.Error()); dbErr != nil {
+					c.log.Error("Failed to mark stripe event failed: %v", dbErr)
+				}
+			} else {
+				mu.Lock()
+				publishedIDs = append(publishedIDs, e.ID)
+				mu.Unlock()
+			}
+		}(ev)
+	}
+	wg.Wait()
+
+	if len(publishedIDs) > 0 {
+		if err := c.repo.MarkStripeEventsPublished(ctx, publishedIDs); err != nil {
+			c.log.Error("Failed to mark stripe outbox events as published: %v", err)
+		}
+	}
+}
+
+// ReportUsage writes to usage_events and stripe_outbox (source of truth).
 func (c *Consumer) ReportUsage(ctx context.Context, eventID, accountID, eventType string, qty int64, stripeCustomerID string) error {
 	event := &models.UsageEvent{
 		ID:        eventID,
@@ -170,19 +197,10 @@ func (c *Consumer) ReportUsage(ctx context.Context, eventID, accountID, eventTyp
 		Quantity:  qty,
 		CreatedAt: time.Now(),
 	}
-	if err := c.repo.RecordUsageEvent(ctx, event); err != nil {
-		return fmt.Errorf("billing: record usage event: %w", err)
+	if err := c.repo.RecordUsageAndStripeEvent(ctx, event, stripeCustomerID); err != nil {
+		return fmt.Errorf("billing: record usage and stripe outbox event: %w", err)
 	}
 
-	// Queue Stripe API call so it doesn't block the hot path
-	c.stripeJobs <- stripeJob{
-		AccountID:        accountID,
-		StripeCustomerID: stripeCustomerID,
-		EventType:        eventType,
-		Quantity:         qty,
-		EventID:          eventID,
-		Attempt:          1,
-	}
 	return nil
 }
 

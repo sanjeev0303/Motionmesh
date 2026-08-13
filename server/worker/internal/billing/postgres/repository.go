@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/worker/internal/billing"
 )
 
 type Repository struct {
@@ -17,6 +18,7 @@ type Repository struct {
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
 }
+
 
 func (r *Repository) GetAccountByID(ctx context.Context, id string) (*models.Account, error) {
 	var acc models.Account
@@ -31,7 +33,7 @@ func (r *Repository) GetAccountByID(ctx context.Context, id string) (*models.Acc
 	return &acc, err
 }
 
-func (r *Repository) RecordUsageEvent(ctx context.Context, event *models.UsageEvent) error {
+func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *models.UsageEvent, stripeCustomerID string) error {
 	var id *string
 	if event.ID != "" {
 		id = &event.ID
@@ -42,11 +44,100 @@ func (r *Repository) RecordUsageEvent(ctx context.Context, event *models.UsageEv
 		createdAt = &event.CreatedAt
 	}
 
-	_, err := r.db.Exec(ctx,
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx,
 		`INSERT INTO usage_events (id, account_id, event_type, quantity, metadata, created_at)
 		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, now()))
 		 ON CONFLICT (id) DO NOTHING`,
 		id, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt,
+	)
+	if err != nil {
+		return err
+	}
+
+	if stripeCustomerID != "" {
+		idempKey := event.ID
+		if idempKey == "" {
+			idempKey = time.Now().String() // fallback if no ID
+		}
+		
+		_, err = tx.Exec(ctx,
+			`INSERT INTO stripe_outbox (account_id, stripe_customer_id, event_type, quantity, idempotency_key)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			event.AccountID, stripeCustomerID, event.EventType, event.Quantity, idempKey,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, maxAttempts int) ([]billing.StripeOutboxEvent, error) {
+	query := `
+		UPDATE stripe_outbox
+		SET status = 'publishing', updated_at = NOW()
+		WHERE id IN (
+			SELECT id
+			FROM stripe_outbox
+			WHERE status IN ('pending', 'failed')
+			  AND next_attempt_at <= NOW()
+			  AND attempts < $1
+			ORDER BY created_at ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT $2
+		)
+		RETURNING id, account_id, stripe_customer_id, event_type, quantity, idempotency_key, attempts
+	`
+
+	rows, err := r.db.Query(ctx, query, maxAttempts, batchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []billing.StripeOutboxEvent
+	for rows.Next() {
+		var e billing.StripeOutboxEvent
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.StripeCustomerID, &e.EventType, &e.Quantity, &e.IdempotencyKey, &e.Attempts); err != nil {
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+func (r *Repository) MarkStripeEventsPublished(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx,
+		`UPDATE stripe_outbox SET status = 'published', updated_at = NOW() WHERE id = ANY($1::uuid[])`,
+		ids,
+	)
+	return err
+}
+
+func (r *Repository) MarkStripeEventFailed(ctx context.Context, id string, attempts, maxAttempts int, errStr string) error {
+	newAttempts := attempts + 1
+	status := "failed"
+	if newAttempts >= maxAttempts {
+		status = "dead_letter"
+	}
+	
+	backoffSeconds := 1 << attempts
+	
+	_, err := r.db.Exec(ctx,
+		`UPDATE stripe_outbox 
+		 SET attempts = $1, status = $2, next_attempt_at = NOW() + INTERVAL '1 second' * $3, last_error = $4, updated_at = NOW()
+		 WHERE id = $5`,
+		newAttempts, status, backoffSeconds, errStr, id,
 	)
 	return err
 }
