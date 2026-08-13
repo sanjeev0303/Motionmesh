@@ -28,7 +28,7 @@ func main() {
 	hasErrors := false
 
 	// 1. Postgres Check
-	log.Info("Checking Postgres: %s", cfg.DatabaseURL)
+	log.Info("Checking Postgres connection")
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		log.Error("Postgres config error: %v", err)
@@ -52,7 +52,7 @@ func main() {
 	}
 
 	// 2. Redis Check
-	log.Info("Checking Redis: %s", cfg.RedisURL)
+	log.Info("Checking Redis connection")
 	rdbOpts, err := redis.ParseURL(cfg.RedisURL)
 	if err != nil {
 		log.Error("Redis config error: %v", err)
@@ -85,7 +85,7 @@ func main() {
 	}
 
 	// 3. NATS Check
-	log.Info("Checking NATS: %s", cfg.QueueURL)
+	log.Info("Checking NATS connection")
 	nc, err := nats.Connect(cfg.QueueURL, nats.Timeout(5*time.Second))
 	if err != nil {
 		log.Error("NATS connect error: %v", err)

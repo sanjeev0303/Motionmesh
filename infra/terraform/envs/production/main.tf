@@ -14,6 +14,7 @@ module "vpc" {
 }
 
 data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
 
 module "eks" {
   source          = "../../modules/eks"
@@ -59,6 +60,27 @@ module "cloudfront" {
   cloudfront_signing_public_key = var.cloudfront_signing_public_key
 }
 
+data "aws_iam_policy_document" "s3_oac_policy" {
+  statement {
+    actions   = ["s3:GetObject"]
+    resources = ["${module.s3.bucket_arn}/*"]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudfront.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceArn"
+      values   = ["arn:aws:cloudfront::${data.aws_caller_identity.current.account_id}:distribution/${module.cloudfront.cloudfront_distribution_id}"]
+    }
+  }
+}
+
+resource "aws_s3_bucket_policy" "oac" {
+  bucket = module.s3.bucket_id
+  policy = data.aws_iam_policy_document.s3_oac_policy.json
+}
+
 module "alb" {
   source      = "../../modules/alb"
   environment = var.environment
@@ -102,4 +124,10 @@ module "ecr_captions" {
   source          = "../../modules/ecr"
   environment     = var.environment
   repository_name = "motionmesh-captions"
+}
+
+module "ecr_diagnostic" {
+  source          = "../../modules/ecr"
+  environment     = var.environment
+  repository_name = "motionmesh-diagnostic"
 }

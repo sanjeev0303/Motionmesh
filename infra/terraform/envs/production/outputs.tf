@@ -100,3 +100,7 @@ output "api_domain_name" {
 output "route53_zone_id" {
   value = var.route53_zone_id
 }
+
+output "diagnostic_repository_url" {
+  value = module.ecr_diagnostic.repository_url
+}

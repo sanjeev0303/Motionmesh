@@ -25,6 +25,7 @@ export S3_BUCKET_REGION=$(terraform output -raw bucket_region)
 export CLOUDFRONT_DISTRIBUTION_DOMAIN=$(terraform output -raw cloudfront_domain_name)
 export API_IMAGE_URI=$(terraform output -raw api_repository_url)
 export WORKER_IMAGE_URI=$(terraform output -raw worker_repository_url)
+export DIAGNOSTIC_IMAGE_URI=$(terraform output -raw diagnostic_repository_url)
 export AWS_REGION=$(terraform output -raw region)
 export WAF_ACL_ARN=$(terraform output -raw web_acl_arn)
 export ACM_CERTIFICATE_ARN=$(terraform output -raw acm_certificate_arn 2>/dev/null || echo "MISSING")
@@ -106,7 +107,7 @@ helm upgrade --install external-dns bitnami/external-dns \
   --set aws.zoneType=public \
   --set txtOwnerId=$EKS_CLUSTER_NAME \
   --set domainFilters[0]=motionmesh.com \
-  --set policy=sync \
+  --set policy=upsert-only \
   --set serviceAccount.create=false \
   --set serviceAccount.name=external-dns \
   --wait
@@ -152,8 +153,8 @@ docker push $WORKER_IMAGE_URI:$GIT_SHA
 
 # Diagnostic
 docker build -t motionmesh-diagnostic -f infra/docker/diagnostic/Dockerfile .
-docker tag motionmesh-diagnostic $API_IMAGE_URI:diagnostic-$GIT_SHA
-docker push $API_IMAGE_URI:diagnostic-$GIT_SHA
+docker tag motionmesh-diagnostic $DIAGNOSTIC_IMAGE_URI:diagnostic-$GIT_SHA
+docker push $DIAGNOSTIC_IMAGE_URI:diagnostic-$GIT_SHA
 
 export MIGRATION_IMAGE_URI="$API_IMAGE_URI:$GIT_SHA"
 

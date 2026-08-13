@@ -70,7 +70,7 @@ echo "[5/7] Checking Application SDK Identity Access..."
 echo "[6/7] Checking Active Connections (DB, Redis, NATS) via Infrastructure Tools..."
 GIT_SHA=$(git rev-parse --short HEAD)
 # Get API image URL and extract base repo up to the tag
-API_REPO=$(terraform output -raw api_repository_url)
+DIAG_REPO=$(terraform output -raw diagnostic_repository_url)
 # The diagnostic image is pushed to motionmesh-diagnostic:$GIT_SHA locally or to ECR
 # Wait, deploy-aws.sh tags it locally as motionmesh-diagnostic:$GIT_SHA, but doesn't push it to an ECR repo for diagnostic!
 # I need to use it. If it's not pushed, the cluster can't pull it unless it's pushed.
@@ -91,8 +91,8 @@ API_REPO=$(terraform output -raw api_repository_url)
 
 kubectl delete pod diag-infra-test -n motionmesh --ignore-not-found 2>/dev/null
 
-kubectl run diag-infra-test --image=$API_REPO:diagnostic-$GIT_SHA -n motionmesh \
-  --overrides='{"spec": {"containers": [{"name": "diag-infra-test", "image": "'$API_REPO':diagnostic-'$GIT_SHA'", "command": ["sleep", "300"], "envFrom": [{"secretRef": {"name": "motionmesh-secrets"}}]}]}}' \
+kubectl run diag-infra-test --image=$DIAG_REPO:diagnostic-$GIT_SHA -n motionmesh \
+  --overrides='{"spec": {"containers": [{"name": "diag-infra-test", "image": "'$DIAG_REPO':diagnostic-'$GIT_SHA'", "command": ["sleep", "300"], "envFrom": [{"secretRef": {"name": "motionmesh-secrets"}}]}]}}' \
   --restart=Never >/dev/null 2>&1
 
 kubectl wait --for=condition=Ready pod/diag-infra-test -n motionmesh --timeout=60s >/dev/null 2>&1 || fail "diag-infra-test pod failed to start"
