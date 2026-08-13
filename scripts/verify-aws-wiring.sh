@@ -18,9 +18,9 @@ for secret in redis cloudfront-signing clerk stripe; do
     aws secretsmanager describe-secret --secret-id motionmesh/$ENVIRONMENT/$secret --region $AWS_REGION >/dev/null 2>&1 && echo "✅ Secret motionmesh/$ENVIRONMENT/$secret exists" || echo "❌ Secret motionmesh/$ENVIRONMENT/$secret missing"
 done
 
-DB_SECRET_ARN=$(aws secretsmanager list-secrets --region $AWS_REGION --query "SecretList[?starts_with(Name, 'rds!cluster-')].ARN" --output text | head -n 1)
+DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn)
 if [[ -n "$DB_SECRET_ARN" && "$DB_SECRET_ARN" != "None" ]]; then
-    echo "✅ RDS managed secret exists: $DB_SECRET_ARN"
+    aws secretsmanager describe-secret --secret-id "$DB_SECRET_ARN" --region $AWS_REGION >/dev/null 2>&1 && echo "✅ RDS managed secret exists: $DB_SECRET_ARN" || echo "❌ RDS managed secret missing"
 else
     echo "❌ RDS managed secret missing"
 fi
@@ -63,10 +63,23 @@ else
 fi
 
 echo "[6/6] Checking AWS Load Balancer Controller (WAF/ALB)..."
-# Check if ingress has an IP address
 ALB_HOST=$(kubectl get ingress motionmesh-api-ingress -n motionmesh -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 if [[ -n "$ALB_HOST" ]]; then
     echo "✅ ALB successfully provisioned by LBC: $ALB_HOST"
+    
+    # Get ALB ARN from AWS using hostname
+    ALB_ARN=$(aws elbv2 describe-load-balancers --region $AWS_REGION --query "LoadBalancers[?DNSName=='$ALB_HOST'].LoadBalancerArn" --output text || echo "")
+    if [[ -n "$ALB_ARN" && "$ALB_ARN" != "None" ]]; then
+        WAF_ASSOC=$(aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region $AWS_REGION --query 'WebACL.ARN' --output text 2>/dev/null || echo "")
+        WAF_EXPECTED=$(terraform output -raw web_acl_arn)
+        if [[ "$WAF_ASSOC" == "$WAF_EXPECTED" ]]; then
+            echo "✅ ALB is protected by exact WAF ACL: $WAF_ASSOC"
+        else
+            echo "❌ ALB is NOT protected by WAF or wrong WAF associated. Expected: $WAF_EXPECTED, Got: $WAF_ASSOC"
+        fi
+    else
+        echo "❌ Could not find ALB ARN in AWS for hostname $ALB_HOST"
+    fi
 else
     echo "❌ ALB not provisioned yet (check 'kubectl logs -n kube-system -l app.kubernetes.io/name=aws-load-balancer-controller')"
 fi

@@ -49,3 +49,35 @@ output "web_acl_arn" {
 output "acm_certificate_arn" {
   value = var.acm_certificate_arn
 }
+
+output "cluster_name" {
+  value = module.eks.cluster_name
+}
+
+output "cluster_ca" {
+  value = module.eks.cluster_ca
+}
+
+output "cluster_version" {
+  value = module.eks.cluster_version
+}
+
+output "oidc_provider_arn" {
+  value = module.eks.oidc_provider_arn
+}
+
+output "private_subnets" {
+  value = module.vpc.private_subnets
+}
+
+output "public_subnets" {
+  value = module.vpc.public_subnets
+}
+
+output "aurora_master_secret_arn" {
+  value = module.aurora.master_user_secret_arn
+}
+
+output "alb_security_group_id" {
+  value = module.alb.security_group_id
+}

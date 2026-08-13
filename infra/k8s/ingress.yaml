@@ -9,11 +9,12 @@ metadata:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/certificate-arn: "${ACM_CERTIFICATE_ARN}"
     alb.ingress.kubernetes.io/wafv2-acl-arn: "${WAF_ACL_ARN}"
+    alb.ingress.kubernetes.io/security-groups: "${ALB_SG_ID}"
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS":443}]'
     alb.ingress.kubernetes.io/ssl-redirect: '443'
 spec:
   rules:
-    - host: api.motionmesh.com # Wait, this should probably be templated too: ${API_DOMAIN}
+    - host: ${API_DOMAIN}
       http:
         paths:
           - path: /

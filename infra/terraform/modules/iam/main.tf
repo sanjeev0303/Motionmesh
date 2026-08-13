@@ -186,7 +186,7 @@ data "aws_caller_identity" "current" {}
 
 resource "aws_eks_pod_identity_association" "external_secrets" {
   cluster_name    = var.cluster_name
-  namespace       = "motionmesh"
+  namespace       = "external-secrets"
   service_account = "external-secrets"
   role_arn        = aws_iam_role.external_secrets.arn
 }

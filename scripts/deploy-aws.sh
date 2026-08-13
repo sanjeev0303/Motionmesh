@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eo pipefail
+set -euo pipefail
 
 ENVIRONMENT=${1:-benchmark}
 echo "Deploying to AWS Environment: $ENVIRONMENT"
@@ -10,13 +10,10 @@ cd infra/terraform/envs/$ENVIRONMENT
 echo "1. terraform init"
 terraform init -upgrade
 
-echo "2. terraform validate"
-terraform validate
-
-echo "4. terraform apply"
+echo "2. terraform apply (Foundation)"
 terraform apply -auto-approve
 
-echo "5. get outputs"
+echo "3. get outputs"
 export S3_BUCKET_ID=$(terraform output -raw bucket_id)
 export S3_BUCKET_REGION=$(terraform output -raw bucket_region)
 export CLOUDFRONT_DISTRIBUTION_DOMAIN=$(terraform output -raw cloudfront_domain_name)
@@ -25,8 +22,11 @@ export WORKER_IMAGE_URI=$(terraform output -raw worker_repository_url)
 export AWS_REGION=$(terraform output -raw region)
 export WAF_ACL_ARN=$(terraform output -raw web_acl_arn)
 export ACM_CERTIFICATE_ARN=$(terraform output -raw acm_certificate_arn 2>/dev/null || echo "MISSING")
-export EKS_CLUSTER_NAME="motionmesh-${ENVIRONMENT}"
-export DB_SECRET_ARN=$(aws secretsmanager list-secrets --region $AWS_REGION --query "SecretList[?starts_with(Name, 'rds!cluster-')].ARN" --output text | head -n 1) # Note: we just fetch the RDS managed secret here. Or we could output it from TF.
+export EKS_CLUSTER_NAME=$(terraform output -raw cluster_name)
+export VPC_ID=$(terraform output -raw vpc_id)
+export DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn)
+export AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint)
+export ALB_SG_ID=$(terraform output -raw alb_security_group_id)
 
 export ENVIRONMENT=$ENVIRONMENT
 export STRIPE_MODE="mock"
@@ -44,39 +44,56 @@ export API_DOMAIN="api.motionmesh.com"
 
 export GIT_SHA=$(git rev-parse --short HEAD)
 
-echo "6. configure kubeconfig"
+echo "4. configure kubeconfig"
 aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
 
-echo "7. verify EKS"
+echo "5. verify EKS"
 kubectl get nodes
 
 cd ../../../../
 
-echo "11. apply namespace"
+echo "6. apply namespace"
 kubectl apply -f infra/k8s/namespace.yaml
 
-echo "12. apply service accounts"
-# They are in namespace.yaml
+echo "7. cluster addons (Helm)"
+helm repo add eks https://aws.github.io/eks-charts || true
+helm repo add external-secrets https://charts.external-secrets.io || true
+helm repo update
 
-echo "10. install External Secrets"
-# Assuming helm is installed and ESO is deployed. If not, this is where we'd helm install it.
-# We'll just apply our SecretStore and ExternalSecret.
+echo "7a. Install AWS Load Balancer Controller"
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=$EKS_CLUSTER_NAME \
+  --set region=$AWS_REGION \
+  --set vpcId=$VPC_ID \
+  --wait
+
+echo "7b. Install External Secrets Operator"
+kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
+kubectl create sa external-secrets -n external-secrets --dry-run=client -o yaml | kubectl apply -f -
+
+helm upgrade --install external-secrets external-secrets/external-secrets \
+    -n external-secrets \
+    --set serviceAccount.name=external-secrets \
+    --set serviceAccount.create=false \
+    --wait
+
+echo "8. Apply External Secrets Config"
 envsubst < infra/k8s/external-secrets.yaml | kubectl apply -f -
 
-echo "13. wait for External Secrets"
-kubectl wait --for=condition=Ready externalsecret/motionmesh-secrets -n motionmesh --timeout=120s || echo "Wait failed, but proceeding..."
+echo "9. wait for External Secrets"
+kubectl wait --for=condition=Ready externalsecret/motionmesh-secrets -n motionmesh --timeout=120s
 
-echo "ConfigMap"
+echo "10. ConfigMap"
 envsubst < infra/k8s/configmap.yaml | kubectl apply -f -
 
-echo "14. apply NATS"
+echo "11. apply NATS"
 kubectl apply -f infra/k8s/nats-cluster.yaml
 
-echo "15. wait for NATS"
+echo "12. wait for NATS"
 kubectl rollout status statefulset/nats -n motionmesh --timeout=120s
 
-echo "18. build immutable images"
-echo "19. push Git SHA images"
+echo "13. push Git SHA images"
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $(echo $API_IMAGE_URI | cut -d'/' -f1)
 
 # API
@@ -89,36 +106,34 @@ docker build -t motionmesh-worker -f server/worker/Dockerfile .
 docker tag motionmesh-worker $WORKER_IMAGE_URI:$GIT_SHA
 docker push $WORKER_IMAGE_URI:$GIT_SHA
 
-# Migration Image (assuming Dockerfile.migrate exists, or we use api image for migrate)
-# For now, we'll use API image which contains the migration binary
 export MIGRATION_IMAGE_URI="$API_IMAGE_URI:$GIT_SHA"
 
-echo "16. run migration"
+echo "14. run migration"
 kubectl delete job motionmesh-db-migration -n motionmesh --ignore-not-found
 envsubst < infra/k8s/db-migration-job.yaml | kubectl apply -f -
 
-echo "17. wait for migration SUCCESS"
+echo "15. wait for migration SUCCESS"
 kubectl wait --for=condition=complete job/motionmesh-db-migration -n motionmesh --timeout=300s
 
-echo "20. deploy API"
+echo "16. deploy API"
 export API_IMAGE_URI="$API_IMAGE_URI:$GIT_SHA"
 envsubst < infra/k8s/api.yaml | kubectl apply -f -
 
-echo "21. deploy Worker"
+echo "17. deploy Worker"
 export WORKER_IMAGE_URI="$WORKER_IMAGE_URI:$GIT_SHA"
 envsubst < infra/k8s/worker.yaml | kubectl apply -f -
 
-echo "22. deploy Ingress"
+echo "18. deploy Ingress"
 envsubst < infra/k8s/ingress.yaml | kubectl apply -f -
 
-echo "23. wait for readiness"
+echo "19. wait for readiness"
 kubectl rollout status deployment/api -n motionmesh --timeout=300s
 kubectl rollout status deployment/worker -n motionmesh --timeout=300s
 
-echo "24. run AWS wiring verification"
+echo "20. run smoke test"
+./scripts/smoke-test-aws.sh $ENVIRONMENT
+
+echo "21. run AWS wiring verification"
 ./scripts/verify-aws-wiring.sh $ENVIRONMENT
 
-echo "25. run smoke test"
-# Assume smoke test script exists or will be run manually
-
-echo "26. DEPLOYMENT READY"
+echo "22. DEPLOYMENT READY"

@@ -61,9 +61,6 @@ module "alb" {
   source           = "../../modules/alb"
   environment      = var.environment
   vpc_id           = module.vpc.vpc_id
-  subnet_ids       = module.vpc.public_subnets
-  eks_cluster_name = module.eks.cluster_id
-  lbc_role_arn     = module.iam.lbc_role_arn
 }
 
 module "waf" {

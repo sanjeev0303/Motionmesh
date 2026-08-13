@@ -44,6 +44,17 @@ spec:
       containers:
       - name: worker
         image: ${WORKER_IMAGE_URI}
+        env:
+        - name: DB_MAX_CONNS
+          valueFrom:
+            configMapKeyRef:
+              name: motionmesh-config
+              key: WORKER_DB_MAX_CONNS
+        - name: DB_MIN_CONNS
+          valueFrom:
+            configMapKeyRef:
+              name: motionmesh-config
+              key: WORKER_DB_MIN_CONNS
         envFrom:
         - secretRef:
             name: motionmesh-secrets
