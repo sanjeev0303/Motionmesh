@@ -163,6 +163,7 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 					"value":              fmt.Sprintf("%d", e.Quantity),
 				},
 			}
+			params.IdempotencyKey = stripe.String(e.IdempotencyKey)
 			
 			_, apiErr := meterevent.New(params)
 			
@@ -205,6 +206,7 @@ func (c *Consumer) ReportUsage(ctx context.Context, eventID, accountID, eventTyp
 }
 
 type usageEvent struct {
+	EventID   string  `json:"event_id"`
 	AccountID string  `json:"account_id"`
 	VideoID   string  `json:"video_id"`
 	Duration  float64 `json:"duration"`
@@ -262,12 +264,17 @@ func (c *Consumer) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn) error 
 					stripeID = *acc.StripeCustomerID
 				}
 
-				meta, metaErr := msg.Metadata()
 				var eventID string
-				if metaErr == nil {
-					eventID = fmt.Sprintf("nats_%s_%d", meta.Stream, meta.Sequence.Stream)
+				if ev.EventID != "" {
+					eventID = ev.EventID
 				} else {
-					eventID = uuid.NewMD5(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s_%d", ev.VideoID, time.Now().Unix()/300))).String()
+					// Fallback for older events without EventID
+					meta, metaErr := msg.Metadata()
+					if metaErr == nil {
+						eventID = fmt.Sprintf("nats_%s_%d", meta.Stream, meta.Sequence.Stream)
+					} else {
+						eventID = uuid.NewMD5(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s_%d", ev.VideoID, time.Now().Unix()/300))).String()
+					}
 				}
 
 				err = c.ReportUsage(ctx, eventID, ev.AccountID, "video_transcode_seconds", qty, stripeID)

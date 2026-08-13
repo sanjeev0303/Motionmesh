@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
@@ -130,7 +131,8 @@ func (r *Repository) Delete(ctx context.Context, id, accountID string) error {
 		"sprite_key":    video.SpriteKey,
 		"preview_key":   video.PreviewKey,
 	}
-	if err := outbox.InsertEvent(ctx, tx, "video.cleanup", payload); err != nil {
+	eventID := uuid.New().String()
+	if err := outbox.InsertEvent(ctx, tx, eventID, "video.cleanup", payload); err != nil {
 		return err
 	}
 

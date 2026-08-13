@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/models"
@@ -84,7 +85,8 @@ func (s *Service) TriggerJob(ctx context.Context, video *models.Video) error {
 		TranscodeBucketID: video.TranscodeBucketID,
 	}
 
-	if err := outbox.InsertEvent(ctx, tx, "transcode.jobs", msg); err != nil {
+	eventID := uuid.New().String()
+	if err := outbox.InsertEvent(ctx, tx, eventID, "transcode.jobs", msg); err != nil {
 		return fmt.Errorf("failed to insert outbox event: %w", err)
 	}
 

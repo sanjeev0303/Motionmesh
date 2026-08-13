@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -375,6 +376,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 }
 
 type usageEvent struct {
+	EventID   string  `json:"event_id"`
 	AccountID string  `json:"account_id"`
 	VideoID   string  `json:"video_id"`
 	Duration  float64 `json:"duration"`
@@ -385,7 +387,9 @@ type usageEvent struct {
 // asynchronously with at-least-once delivery guarantees and exponential backoff.
 // This replaces the previous nc.Publish (core NATS, no persistence) pattern.
 func (h *Handler) writeUsageEventOutbox(ctx context.Context, accountID, videoID string, duration float64) {
+	eventID := uuid.New().String()
 	event := usageEvent{
+		EventID:   eventID,
 		AccountID: accountID,
 		VideoID:   videoID,
 		Duration:  duration,
@@ -398,7 +402,7 @@ func (h *Handler) writeUsageEventOutbox(ctx context.Context, accountID, videoID 
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := outbox.InsertEvent(ctx, tx, "motionmesh.billing.usage", event); err != nil {
+	if err := outbox.InsertEvent(ctx, tx, eventID, "motionmesh.billing.usage", event); err != nil {
 		h.log.Error("writeUsageEventOutbox: insert outbox event: %v", err)
 		return
 	}

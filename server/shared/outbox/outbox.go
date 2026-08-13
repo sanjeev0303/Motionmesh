@@ -16,16 +16,16 @@ import (
 )
 
 // InsertEvent saves an event into the outbox table using a provided transaction.
-func InsertEvent(ctx context.Context, tx pgx.Tx, subject string, payload interface{}) error {
+func InsertEvent(ctx context.Context, tx pgx.Tx, eventID string, subject string, payload interface{}) error {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("failed to marshal outbox payload: %w", err)
 	}
 
 	_, err = tx.Exec(ctx, `
-		INSERT INTO outbox_events (subject, payload, status)
-		VALUES ($1, $2, 'pending')
-	`, subject, data)
+		INSERT INTO outbox_events (id, subject, payload, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, eventID, subject, data)
 	if err != nil {
 		return fmt.Errorf("failed to insert outbox event: %w", err)
 	}
