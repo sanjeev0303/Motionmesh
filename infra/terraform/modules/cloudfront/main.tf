@@ -44,12 +44,11 @@ module "cloudfront" {
     compress               = true
     use_forwarded_values   = false
     
-    # Required to forward CloudFront-* cookies to the viewer for signed cookies
+    # Signed cookies are validated at the edge. Do not forward them to S3.
     forwarded_values = {
       query_string = false
       cookies = {
-        forward           = "whitelist"
-        whitelisted_names = ["CloudFront-Key-Pair-Id", "CloudFront-Policy", "CloudFront-Signature"]
+        forward = "none"
       }
     }
   }
@@ -59,14 +58,9 @@ module "cloudfront" {
   }
 }
 
-# Derive public key from provided private key
-data "tls_public_key" "this" {
-  private_key_pem = var.cloudfront_signing_private_key
-}
-
 resource "aws_cloudfront_public_key" "this" {
   comment     = "MotionMesh CloudFront Signer - ${var.environment}"
-  encoded_key = data.tls_public_key.this.public_key_pem
+  encoded_key = var.cloudfront_signing_public_key
   name        = "motionmesh-signer-${var.environment}"
 }
 
@@ -74,18 +68,6 @@ resource "aws_cloudfront_key_group" "this" {
   comment = "MotionMesh Signer Key Group - ${var.environment}"
   items   = [aws_cloudfront_public_key.this.id]
   name    = "motionmesh-key-group-${var.environment}"
-}
-
-resource "aws_secretsmanager_secret" "cloudfront_signing" {
-  name = "motionmesh/${var.environment}/cloudfront-signing"
-}
-
-resource "aws_secretsmanager_secret_version" "cloudfront_signing" {
-  secret_id     = aws_secretsmanager_secret.cloudfront_signing.id
-  secret_string = jsonencode({
-    key_id      = aws_cloudfront_public_key.this.id
-    private_key = var.cloudfront_signing_private_key
-  })
 }
 
 resource "aws_route53_record" "media" {

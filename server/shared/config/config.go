@@ -58,6 +58,12 @@ type Config struct {
 }
 
 func Load() *Config {
+	cd := getEnv("CLOUDFRONT_DISTRIBUTION_DOMAIN", "")
+	cmd := getEnv("CLOUDFRONT_MEDIA_DOMAIN", "")
+	if cmd == "" {
+		cmd = cd
+	}
+
 	return &Config{
 		Environment: getEnv("ENVIRONMENT", "development"),
 
@@ -88,10 +94,10 @@ func Load() *Config {
 		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
 		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", false),
 		AllowedOrigins:    getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
-		CloudFrontDistributionDomain: getEnv("CLOUDFRONT_DISTRIBUTION_DOMAIN", ""),
+		CloudFrontDistributionDomain: cd,
 		CloudFrontKeyID:       getEnv("CLOUDFRONT_KEY_ID", ""),
 		CloudFrontPrivateKey:  getEnv("CLOUDFRONT_PRIVATE_KEY", ""),
-		CloudFrontMediaDomain: getEnv("CLOUDFRONT_MEDIA_DOMAIN", ""),
+		CloudFrontMediaDomain: cmd,
 		CloudFrontPlaybackTTL: getEnv("CLOUDFRONT_PLAYBACK_TTL", "15m"),
 		CookieDomain:          getEnv("COOKIE_DOMAIN", ""),
 		DBMaxConns:            getEnvInt("DB_MAX_CONNS", 200),

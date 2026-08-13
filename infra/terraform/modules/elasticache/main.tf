@@ -36,3 +36,15 @@ resource "aws_elasticache_replication_group" "this" {
     Environment = var.environment
   }
 }
+
+resource "aws_secretsmanager_secret" "redis" {
+  name = "motionmesh/${var.environment}/redis"
+}
+
+resource "aws_secretsmanager_secret_version" "redis" {
+  secret_id     = aws_secretsmanager_secret.redis.id
+  secret_string = jsonencode({
+    host = aws_elasticache_replication_group.this.primary_endpoint_address
+    port = aws_elasticache_replication_group.this.port
+  })
+}

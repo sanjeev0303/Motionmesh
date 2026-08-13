@@ -52,8 +52,7 @@ variable "route53_zone_id" {
   default     = ""
 }
 
-variable "cloudfront_signing_private_key" {
-  description = "PEM encoded RSA private key for CloudFront signed cookies"
+variable "cloudfront_signing_public_key" {
+  description = "PEM encoded RSA public key for CloudFront signed cookies"
   type        = string
-  sensitive   = true
 }

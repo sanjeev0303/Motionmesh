@@ -54,7 +54,7 @@ module "cloudfront" {
   media_domain_name              = var.media_domain_name
   acm_certificate_arn            = var.acm_certificate_arn
   route53_zone_id                = var.route53_zone_id
-  cloudfront_signing_private_key = var.cloudfront_signing_private_key
+  cloudfront_signing_public_key = var.cloudfront_signing_public_key
 }
 
 module "alb" {

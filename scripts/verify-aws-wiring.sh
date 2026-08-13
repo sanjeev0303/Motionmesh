@@ -14,9 +14,16 @@ aws ecr describe-repositories --repository-names motionmesh-api --region $AWS_RE
 aws ecr describe-repositories --repository-names motionmesh-worker --region $AWS_REGION >/dev/null && echo "✅ Worker Repo exists" || echo "❌ Worker Repo missing"
 
 echo "[2/6] Checking Secrets Manager..."
-for secret in database redis cloudfront-signing clerk stripe; do
+for secret in redis cloudfront-signing clerk stripe; do
     aws secretsmanager describe-secret --secret-id motionmesh/$ENVIRONMENT/$secret --region $AWS_REGION >/dev/null 2>&1 && echo "✅ Secret motionmesh/$ENVIRONMENT/$secret exists" || echo "❌ Secret motionmesh/$ENVIRONMENT/$secret missing"
 done
+
+DB_SECRET_ARN=$(aws secretsmanager list-secrets --region $AWS_REGION --query "SecretList[?starts_with(Name, 'rds!cluster-')].ARN" --output text | head -n 1)
+if [[ -n "$DB_SECRET_ARN" && "$DB_SECRET_ARN" != "None" ]]; then
+    echo "✅ RDS managed secret exists: $DB_SECRET_ARN"
+else
+    echo "❌ RDS managed secret missing"
+fi
 
 echo "[3/6] Checking S3 Bucket Security..."
 BUCKET_ID=$(terraform output -raw bucket_id)
@@ -45,6 +52,14 @@ if [[ -n "$API_ROLE" ]]; then
     echo "✅ API ServiceAccount has Pod Identity mapping annotation: $API_ROLE"
 else
     echo "⚠️  API ServiceAccount lacks role annotation (this is fine if using EKS Pod Identity Association directly in cluster)"
+fi
+
+echo "[5.5/6] Checking NATS Topology..."
+NATS_PODS=$(kubectl get pods -l app=nats -n motionmesh --no-headers | wc -l)
+if [[ "$NATS_PODS" == "3" ]]; then
+    echo "✅ NATS has 3 replicas"
+else
+    echo "❌ NATS has $NATS_PODS replicas, expected 3"
 fi
 
 echo "[6/6] Checking AWS Load Balancer Controller (WAF/ALB)..."

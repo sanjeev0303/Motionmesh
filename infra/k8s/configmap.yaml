@@ -5,7 +5,7 @@ metadata:
   namespace: motionmesh
 data:
   ENVIRONMENT: "${ENVIRONMENT}"
-  QUEUE_URL: "nats://nats-0.nats.motionmesh.svc.cluster.local:4222"
+  QUEUE_URL: "nats://nats.motionmesh.svc.cluster.local:4222"
   STORAGE_BUCKET: "${S3_BUCKET_ID}"
   STORAGE_REGION: "${S3_BUCKET_REGION}"
   CLOUDFRONT_DISTRIBUTION_DOMAIN: "${CLOUDFRONT_DISTRIBUTION_DOMAIN}"

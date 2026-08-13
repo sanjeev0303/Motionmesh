@@ -41,16 +41,6 @@ spec:
                 matchLabels:
                   app: worker
               topologyKey: kubernetes.io/hostname
-      initContainers:
-        - name: wait-for-migrations
-          image: busybox:1.36
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for migrations to complete..."
-              until kubectl get job motionmesh-db-migration -n motionmesh -o jsonpath='{.status.succeeded}' | grep 1; do sleep 5; done
-              echo "Migrations complete!"
       containers:
       - name: worker
         image: ${WORKER_IMAGE_URI}

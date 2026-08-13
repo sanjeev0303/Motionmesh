@@ -151,3 +151,42 @@ data "aws_eks_cluster" "this" {
 data "aws_iam_openid_connect_provider" "eks" {
   url = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
 }
+
+# -----------------------------------------------------------------------------
+# External Secrets Role
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "external_secrets" {
+  name               = "motionmesh-external-secrets-${var.environment}"
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+}
+
+resource "aws_iam_role_policy" "external_secrets" {
+  name = "secrets-access"
+  role = aws_iam_role.external_secrets.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret"
+        ]
+        Resource = [
+          "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:motionmesh/${var.environment}/*",
+          "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:rds!cluster-*"
+        ]
+      }
+    ]
+  })
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_eks_pod_identity_association" "external_secrets" {
+  cluster_name    = var.cluster_name
+  namespace       = "motionmesh"
+  service_account = "external-secrets"
+  role_arn        = aws_iam_role.external_secrets.arn
+}

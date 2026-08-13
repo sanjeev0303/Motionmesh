@@ -20,3 +20,11 @@ metadata:
   name: motionmesh-worker
   namespace: motionmesh
 automountServiceAccountToken: false
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: external-secrets
+  namespace: motionmesh
+automountServiceAccountToken: true
