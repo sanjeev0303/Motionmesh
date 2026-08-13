@@ -73,7 +73,7 @@ module "waf" {
 module "iam" {
   source                   = "../../modules/iam"
   environment              = var.environment
-  cluster_name             = module.eks.cluster_id
+  cluster_name             = module.eks.cluster_name
   s3_bucket_arn            = module.s3.bucket_arn
   route53_zone_id          = var.route53_zone_id
   oidc_provider_arn        = module.eks.oidc_provider_arn

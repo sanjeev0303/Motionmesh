@@ -37,19 +37,31 @@ variable "aurora_instance_class" {
 variable "media_domain_name" {
   description = "The custom media domain name (e.g., media.motionmesh.com)"
   type        = string
-  default     = ""
+  
+  validation {
+    condition     = length(var.media_domain_name) > 0
+    error_message = "media_domain_name must not be empty."
+  }
 }
 
 variable "acm_certificate_arn" {
   description = "The ARN of the ACM certificate to use for the custom domain"
   type        = string
-  default     = ""
+  
+  validation {
+    condition     = startswith(var.acm_certificate_arn, "arn:aws:acm:")
+    error_message = "acm_certificate_arn must start with 'arn:aws:acm:'."
+  }
 }
 
 variable "route53_zone_id" {
   description = "Route53 Hosted Zone ID for alias records"
   type        = string
-  default     = ""
+  
+  validation {
+    condition     = startswith(var.route53_zone_id, "Z")
+    error_message = "route53_zone_id must start with 'Z'."
+  }
 }
 
 variable "cloudfront_signing_public_key" {

@@ -10,8 +10,14 @@ cd infra/terraform/envs/$ENVIRONMENT
 echo "1. terraform init"
 terraform init -upgrade
 
+echo "1a. terraform validate"
+terraform validate
+
+echo "1b. terraform plan"
+terraform plan -out=tfplan
+
 echo "2. terraform apply (Foundation)"
-terraform apply -auto-approve
+terraform apply -auto-approve tfplan
 
 echo "3. get outputs"
 export S3_BUCKET_ID=$(terraform output -raw bucket_id)
