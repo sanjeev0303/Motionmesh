@@ -44,26 +44,6 @@ func (c *Consumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to get jetstream context: %w", err)
 	}
 
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:     "CLEANUP",
-		Subjects: []string{"video.cleanup"},
-		Storage:  nats.FileStorage,
-	})
-	if err != nil {
-		c.log.Error("failed to add cleanup stream (might already exist): %v", err)
-	}
-
-	_, err = js.AddConsumer("CLEANUP", &nats.ConsumerConfig{
-		Durable:       "cleanup_worker",
-		AckPolicy:     nats.AckExplicitPolicy,
-		MaxDeliver:    5,
-		AckWait:       5 * time.Minute,
-		FilterSubject: "video.cleanup",
-	})
-	if err != nil {
-		c.log.Error("failed to add cleanup consumer (might already exist): %v", err)
-	}
-
 	sub, err := js.PullSubscribe("video.cleanup", "cleanup_worker")
 	if err != nil {
 		return fmt.Errorf("failed to pull subscribe cleanup: %w", err)

@@ -40,6 +40,7 @@ import (
 	"github.com/motionmesh/server/shared/config"
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/outbox"
 )
 
 func main() {
@@ -119,7 +120,7 @@ func main() {
 	// ── Billing ───────────────────────────────────────────────────────────────
 	var billingRepo billing.BillingRepository = billingpostgres.NewRepository(db)
 	billingSvc := billing.NewService(billingRepo, rdb, cfg.StripeSecretKey, cfg.StripeWebhookSecret, log)
-	go func() { if err := billingSvc.ConsumeUsageEvents(ctx, nc, log); err != nil { log.Error("ConsumeUsageEvents failed: %v", err) } }()
+	// ConsumeUsageEvents moved to worker
 
 	// ── Auth last-used flush ───────────────────────────────────────────────────
 	// Drains the Redis buffer of api_key last-used timestamps to Postgres every
@@ -140,6 +141,14 @@ func main() {
 	videosSvc := videos.NewService(videosRepo)
 	transcodeSvc := transcode.NewService(db, nc)
 
+	// ── Outbox ────────────────────────────────────────────────────────────────
+	outboxRelay, err := outbox.NewRelay(db, nc, cfg.OutboxBatchSize, cfg.OutboxMaxAttempts, log)
+	if err != nil {
+		log.Error("outbox relay init: %v", err)
+	} else {
+		go outboxRelay.Start(ctx, time.Duration(cfg.OutboxPollIntervalMs)*time.Millisecond)
+	}
+
 	// ── Router ────────────────────────────────────────────────────────────────
 	r := chi.NewRouter()
 	
@@ -157,7 +166,7 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	r.Use(chimiddleware.Logger)
+	r.Use(apimiddleware.SampledLogger(cfg.LogSampleRate, log))
 	r.Use(chimiddleware.Recoverer)
 	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.StripSlashes)

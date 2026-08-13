@@ -5,8 +5,9 @@ module "vpc" {
   azs                = var.availability_zones
   public_subnets     = ["10.2.1.0/24", "10.2.2.0/24"]
   private_subnets    = ["10.2.3.0/24", "10.2.4.0/24"]
-  database_subnets   = ["10.2.5.0/24", "10.2.6.0/24"]
-  single_nat_gateway = true
+  database_subnets       = ["10.2.5.0/24", "10.2.6.0/24"]
+  single_nat_gateway     = false
+  one_nat_gateway_per_az = true
   tags = {
     Environment = var.environment
   }

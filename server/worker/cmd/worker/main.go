@@ -14,12 +14,15 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 
 	brandingpostgres "github.com/motionmesh/server/shared/branding/postgres"
 	"github.com/motionmesh/server/shared/config"
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/storage"
+	"github.com/motionmesh/server/worker/internal/billing"
+	billingpostgres "github.com/motionmesh/server/worker/internal/billing/postgres"
 	"github.com/motionmesh/server/worker/internal/captions"
 	"github.com/motionmesh/server/worker/internal/cleanup"
 	"github.com/motionmesh/server/worker/internal/job"
@@ -100,8 +103,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// ── Redis ─────────────────────────────────────────────────────────────────
+	rdbOpts, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		log.Error("redis config: %v", err)
+		os.Exit(1)
+	}
+	rdb := redis.NewClient(rdbOpts)
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Error("redis connect: %v", err)
+		os.Exit(1)
+	}
+	defer rdb.Close()
+
 	// ── Components ───────────────────────────────────────────────────────────
 	brandingRepo := brandingpostgres.NewRepository(db)
+	billingRepo := billingpostgres.NewRepository(db)
+	billingConsumer := billing.NewConsumer(billingRepo, cfg.StripeSecretKey, log)
+	
 	up := uploader.NewUploader(storageAdapter)
 	capClient := captions.NewClient(cfg.CaptionsSidecarURL, &http.Client{Timeout: 30 * time.Minute})
 	
@@ -118,6 +137,12 @@ func main() {
 	go func() {
 		if err := cleanupConsumer.Start(ctx); err != nil {
 			log.Error("cleanup consumer failed: %v", err)
+		}
+	}()
+	
+	go func() {
+		if err := billingConsumer.ConsumeUsageEvents(ctx, nc); err != nil {
+			log.Error("billing consumer failed: %v", err)
 		}
 	}()
 

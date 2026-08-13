@@ -44,6 +44,9 @@ type Config struct {
 	RateLimitEnabled     bool
 	CleanupConcurrency   int
 	OutboxBatchSize      int
+	OutboxMaxAttempts    int
+	OutboxPollIntervalMs int
+	LogSampleRate        float64
 }
 
 func Load() *Config {
@@ -80,7 +83,19 @@ func Load() *Config {
 		RateLimitEnabled:     getEnvBool("RATE_LIMIT_ENABLED", true),
 		CleanupConcurrency:   getEnvInt("CLEANUP_CONCURRENCY", 8),
 		OutboxBatchSize:      getEnvInt("OUTBOX_BATCH_SIZE", 100),
+		OutboxMaxAttempts:    getEnvInt("OUTBOX_MAX_ATTEMPTS", 5),
+		OutboxPollIntervalMs: getEnvInt("OUTBOX_POLL_INTERVAL_MS", 1000),
+		LogSampleRate:        getEnvFloat("LOG_SAMPLE_RATE", 0.05),
 	}
+}
+
+func getEnvFloat(key string, fallback float64) float64 {
+	if value, ok := os.LookupEnv(key); ok {
+		if f, err := strconv.ParseFloat(value, 64); err == nil {
+			return f
+		}
+	}
+	return fallback
 }
 
 func getEnv(key, fallback string) string {

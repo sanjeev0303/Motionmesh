@@ -43,29 +43,6 @@ func (c *Consumer) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to get jetstream context: %w", err)
 	}
 
-	// Ensure stream exists
-	_, err = js.AddStream(&nats.StreamConfig{
-		Name:     "TRANSCODE",
-		Subjects: []string{"transcode.jobs"},
-		Storage:  nats.FileStorage,
-	})
-	if err != nil {
-		c.log.Error("failed to add stream (might already exist): %v", err)
-	}
-
-	// Ensure consumer exists
-	// We use a pull consumer to control concurrency per worker
-	_, err = js.AddConsumer("TRANSCODE", &nats.ConsumerConfig{
-		Durable:       "transcode_worker",
-		AckPolicy:     nats.AckExplicitPolicy,
-		MaxDeliver:    3,
-		AckWait:       30 * time.Minute, // transcode can take a long time
-		FilterSubject: "transcode.jobs",
-	})
-	if err != nil {
-		c.log.Error("failed to add consumer (might already exist): %v", err)
-	}
-
 	sub, err := js.PullSubscribe("transcode.jobs", "transcode_worker")
 	if err != nil {
 		return fmt.Errorf("failed to pull subscribe: %w", err)

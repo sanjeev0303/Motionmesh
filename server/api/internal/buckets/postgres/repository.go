@@ -96,26 +96,27 @@ func (r *Repository) GetBucketUsage(ctx context.Context, bucketID string) (usedB
 	return
 }
 
-func (r *Repository) ListObjectsByBucket(ctx context.Context, bucketID string, limit int, cursor string) ([]*models.BucketObject, error) {
-	// A simple paginated query, can expand later with cursor filtering if needed
+func (r *Repository) ListObjectsByBucket(ctx context.Context, accountID, bucketID string, limit int, cursor string) ([]*models.BucketObject, error) {
+	// Join with buckets to enforce account ownership check
 	query := `
-		SELECT id, bucket_id, key, size_bytes, content_type, uploaded_at
-		FROM objects
-		WHERE bucket_id = $1
+		SELECT o.id, o.bucket_id, o.key, o.size_bytes, o.content_type, o.uploaded_at
+		FROM objects o
+		JOIN buckets b ON b.id = o.bucket_id
+		WHERE o.bucket_id = $1 AND b.account_id = $2
 	`
-	args := []interface{}{bucketID}
+	args := []interface{}{bucketID, accountID}
 
 	if cursor != "" {
 		c, err := pagination.DecodeCursor[pagination.ObjectCursor](cursor)
 		if err != nil {
 			return nil, err
 		}
-		query += ` AND (uploaded_at, id) < ($2, $3) ORDER BY uploaded_at DESC, id DESC LIMIT $4`
+		query += ` AND (o.uploaded_at, o.id) < ($3, $4) ORDER BY o.uploaded_at DESC, o.id DESC LIMIT $5`
 		args = append(args, c.UploadedAt, c.ID, limit)
 	}
 
-	if len(args) == 1 {
-		query += ` ORDER BY uploaded_at DESC, id DESC LIMIT $2`
+	if len(args) == 2 {
+		query += ` ORDER BY o.uploaded_at DESC, o.id DESC LIMIT $3`
 		args = append(args, limit)
 	}
 

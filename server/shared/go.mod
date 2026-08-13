@@ -7,6 +7,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign v1.11.13
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.37
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.3
+	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/lib/pq v1.12.3
 	github.com/nats-io/nats.go v1.52.0
@@ -34,7 +35,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

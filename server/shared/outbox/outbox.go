@@ -32,13 +32,14 @@ func InsertEvent(ctx context.Context, tx pgx.Tx, subject string, payload interfa
 
 // Relay handles polling the outbox table and publishing to NATS.
 type Relay struct {
-	db        *pgxpool.Pool
-	js        nats.JetStreamContext
-	log       *logger.Logger
-	batchSize int
+	db          *pgxpool.Pool
+	js          nats.JetStreamContext
+	log         *logger.Logger
+	batchSize   int
+	maxAttempts int
 }
 
-func NewRelay(db *pgxpool.Pool, nc *nats.Conn, batchSize int, log *logger.Logger) (*Relay, error) {
+func NewRelay(db *pgxpool.Pool, nc *nats.Conn, batchSize, maxAttempts int, log *logger.Logger) (*Relay, error) {
 	js, err := nc.JetStream()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get jetstream context: %w", err)
@@ -46,11 +47,15 @@ func NewRelay(db *pgxpool.Pool, nc *nats.Conn, batchSize int, log *logger.Logger
 	if batchSize <= 0 {
 		batchSize = 100
 	}
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
 	return &Relay{
-		db:        db,
-		js:        js,
-		log:       log,
-		batchSize: batchSize,
+		db:          db,
+		js:          js,
+		log:         log,
+		batchSize:   batchSize,
+		maxAttempts: maxAttempts,
 	}, nil
 }
 
@@ -75,18 +80,20 @@ func (r *Relay) processOutbox(ctx context.Context) {
 	
 	query := fmt.Sprintf(`
 		UPDATE outbox_events
-		SET claimed_until = NOW() + INTERVAL '1 minute'
+		SET claimed_until = NOW() + INTERVAL '1 minute',
+		    attempts = attempts + 1
 		WHERE id IN (
 			SELECT id 
 			FROM outbox_events 
 			WHERE published_at IS NULL 
 			  AND (claimed_until IS NULL OR claimed_until < NOW())
+			  AND attempts < %d
 			ORDER BY created_at ASC
 			FOR UPDATE SKIP LOCKED
 			LIMIT %d
 		)
 		RETURNING id, subject, payload
-	`, r.batchSize)
+	`, r.maxAttempts, r.batchSize)
 
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {

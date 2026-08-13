@@ -12,7 +12,7 @@ type BucketRepository interface {
 	CreateBucket(ctx context.Context, bucket *models.Bucket) error
 	UpsertObjects(ctx context.Context, objects []models.BucketObject) error
 	GetBucketUsage(ctx context.Context, bucketID string) (usedBytes int64, count int, err error)
-	ListObjectsByBucket(ctx context.Context, bucketID string, limit int, cursor string) ([]*models.BucketObject, error)
+	ListObjectsByBucket(ctx context.Context, accountID, bucketID string, limit int, cursor string) ([]*models.BucketObject, error)
 }
 
 type Service struct {
@@ -46,6 +46,6 @@ func (s *Service) GetBucketUsage(ctx context.Context, bucketID string) (usedByte
 	return s.repo.GetBucketUsage(ctx, bucketID)
 }
 
-func (s *Service) ListObjectsByBucket(ctx context.Context, bucketID string, limit int, cursor string) ([]*models.BucketObject, error) {
-	return s.repo.ListObjectsByBucket(ctx, bucketID, limit, cursor)
+func (s *Service) ListObjectsByBucket(ctx context.Context, accountID, bucketID string, limit int, cursor string) ([]*models.BucketObject, error) {
+	return s.repo.ListObjectsByBucket(ctx, accountID, bucketID, limit, cursor)
 }

@@ -99,7 +99,7 @@ func (h *Handler) listObjects(w http.ResponseWriter, r *http.Request) {
 
 	cursor := r.URL.Query().Get("cursor")
 
-	objects, err := h.service.ListObjectsByBucket(r.Context(), bucketID, limit, cursor)
+	objects, err := h.service.ListObjectsByBucket(r.Context(), account.ID, bucketID, limit, cursor)
 	if err != nil {
 		if err == pagination.ErrInvalidCursor {
 			http.Error(w, "Invalid cursor format", http.StatusBadRequest)

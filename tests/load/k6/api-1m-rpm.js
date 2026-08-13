@@ -31,8 +31,24 @@ export default function () {
   const params = {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
     },
   };
-  const res = http.get(`${BASE_URL}/api/v1/videos?limit=10`, params);
-  check(res, { 'status is 200': (r) => r.status === 200 });
+
+  const rand = Math.random();
+  if (rand < 0.8) {
+    // 80% read traffic
+    const res = http.get(`${BASE_URL}/api/v1/videos?limit=10`, params);
+    check(res, { 'status is 200': (r) => r.status === 200 });
+  } else {
+    // 20% write traffic
+    const payload = JSON.stringify({
+      bucket_id: 'default', // Using a default bucket name or ID for the test
+      title: 'Load Test Video',
+      filename: 'load-test.mp4'
+    });
+    const res = http.post(`${BASE_URL}/api/v1/videos`, payload, params);
+    // Might fail with 400 or 404 if bucket doesn't exist, just check status
+    check(res, { 'status is 200 or 201': (r) => r.status === 200 || r.status === 201 });
+  }
 }

@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"golang.org/x/sync/singleflight"
 
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
-	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v82"
 	"github.com/stripe/stripe-go/v82/billing/meter"
@@ -48,8 +48,9 @@ func NewService(repo BillingRepository, rdb *redis.Client, stripeSecretKey, webh
 
 // ReportUsage writes to usage_events (source of truth) and sends a Stripe Meter Event.
 // Stripe Meter Events are downstream projections — the DB record is authoritative.
-func (s *Service) ReportUsage(ctx context.Context, accountID, eventType string, qty int64, stripeCustomerID string) error {
+func (s *Service) ReportUsage(ctx context.Context, eventID, accountID, eventType string, qty int64, stripeCustomerID string) error {
 	event := &models.UsageEvent{
+		ID:        eventID,
 		AccountID: accountID,
 		EventType: eventType,
 		Quantity:  qty,
@@ -59,16 +60,27 @@ func (s *Service) ReportUsage(ctx context.Context, accountID, eventType string, 
 		return fmt.Errorf("billing: record usage event: %w", err)
 	}
 
-	// Report to Stripe Meters API (not the legacy usage-records API).
-	params := &stripe.BillingMeterEventParams{
-		EventName: stripe.String(eventType),
-		Payload: map[string]string{
-			"stripe_customer_id": stripeCustomerID,
-			"value":              fmt.Sprintf("%d", qty),
-		},
-	}
-	_, err := meterevent.New(params)
-	return err
+	// Make Stripe API calls asynchronous so they don't block the hot path
+	go func() {
+		// Respect mock mode for load testing
+		if os.Getenv("STRIPE_MOCK_MODE") == "true" {
+			return
+		}
+
+		// Report to Stripe Meters API (not the legacy usage-records API).
+		params := &stripe.BillingMeterEventParams{
+			EventName: stripe.String(eventType),
+			Payload: map[string]string{
+				"stripe_customer_id": stripeCustomerID,
+				"value":              fmt.Sprintf("%d", qty),
+			},
+		}
+		_, err := meterevent.New(params)
+		if err != nil {
+			s.log.Error("failed to report stripe meter event for %s: %v", accountID, err)
+		}
+	}()
+	return nil
 }
 
 // CheckBalance verifies the account hasn't exhausted its plan limits in Postgres.
@@ -359,64 +371,3 @@ func (s *Service) CreateCheckoutSession(ctx context.Context, account *models.Acc
 	return sess.URL, nil
 }
 
-type usageEvent struct {
-	AccountID string  `json:"account_id"`
-	VideoID   string  `json:"video_id"`
-	Duration  float64 `json:"duration"`
-}
-
-// ConsumeUsageEvents listens to NATS and reports usage to Stripe and DB.
-func (s *Service) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn, log *logger.Logger) error {
-	sub, err := nc.SubscribeSync("motionmesh.billing.usage")
-	if err != nil {
-		return fmt.Errorf("subscribe to usage events: %w", err)
-	}
-	defer sub.Unsubscribe()
-
-	log.Info("Started consuming usage events on motionmesh.billing.usage")
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			msg, err := sub.NextMsg(5 * time.Second)
-			if err != nil {
-				if err == nats.ErrTimeout {
-					continue
-				}
-				log.Error("nats next msg: %v", err)
-				continue
-			}
-
-			var ev usageEvent
-			if err := json.Unmarshal(msg.Data, &ev); err != nil {
-				log.Error("unmarshal usage event: %v", err)
-				continue
-			}
-
-			acc, err := s.repo.GetAccountByID(ctx, ev.AccountID)
-			if err != nil || acc == nil {
-				log.Error("failed to get account %s for usage reporting: %v", ev.AccountID, err)
-				continue
-			}
-
-			qty := int64(ev.Duration)
-			if qty <= 0 {
-				qty = 1 // Minimum 1 second billing
-			}
-
-			var stripeID string
-			if acc.StripeCustomerID != nil {
-				stripeID = *acc.StripeCustomerID
-			}
-
-			err = s.ReportUsage(ctx, ev.AccountID, "video_transcode_seconds", qty, stripeID)
-			if err != nil {
-				log.Error("failed to report usage for account %s: %v", ev.AccountID, err)
-			} else {
-				log.Info("Reported usage for account %s: %d seconds", ev.AccountID, qty)
-			}
-		}
-	}
-}

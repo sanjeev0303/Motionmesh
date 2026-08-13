@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -54,10 +55,21 @@ func (r *Repository) UpdatePlan(ctx context.Context, accountID, plan, status str
 }
 
 func (r *Repository) RecordUsageEvent(ctx context.Context, event *models.UsageEvent) error {
+	var id *string
+	if event.ID != "" {
+		id = &event.ID
+	}
+	
+	var createdAt *time.Time
+	if !event.CreatedAt.IsZero() {
+		createdAt = &event.CreatedAt
+	}
+
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO usage_events (account_id, event_type, quantity, metadata)
-		 VALUES ($1, $2, $3, $4)`,
-		event.AccountID, event.EventType, event.Quantity, event.Metadata,
+		`INSERT INTO usage_events (id, account_id, event_type, quantity, metadata, created_at)
+		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, now()))
+		 ON CONFLICT (id) DO NOTHING`,
+		id, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt,
 	)
 	return err
 }
@@ -77,10 +89,13 @@ func (r *Repository) GetAggregatedUsage(ctx context.Context, accountID, eventTyp
 	}
 
 	err := r.db.QueryRow(ctx,
-		`SELECT COALESCE(SUM(quantity), 0) FROM usage_events
+		`SELECT COALESCE(total, 0) FROM account_usage_counters
 		 WHERE account_id = $1 AND event_type = $2`,
 		accountID, eventType,
 	).Scan(&total)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, nil
+	}
 	return total, err
 }
 
