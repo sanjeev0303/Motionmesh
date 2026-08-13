@@ -18,3 +18,13 @@ variable "route53_zone_id" {
   type        = string
   default     = ""
 }
+
+variable "oidc_provider_arn" {
+  description = "The ARN of the OIDC Provider for EKS"
+  type        = string
+}
+
+variable "aurora_master_secret_arn" {
+  description = "The ARN of the Aurora master secret in AWS Secrets Manager"
+  type        = string
+}

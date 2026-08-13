@@ -63,20 +63,42 @@ else
 fi
 
 echo "[5.8/6] Checking Application SDK Identity Access..."
-# Find an API pod and test S3 access using AWS SDK/CLI if available, otherwise check the env vars for STS session.
-# We will execute a simple python snippet or curl to hit S3 using the instance metadata / pod identity token.
-API_POD=$(kubectl get pods -n motionmesh -l app=api -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-if [[ -n "$API_POD" ]]; then
-    # Use aws-cli embedded in our image if available, or just check the token mount
-    TOKEN_MOUNT=$(kubectl exec -n motionmesh $API_POD -- ls /var/run/secrets/pods.eks.amazonaws.com/serviceaccount/eks-pod-identity-token 2>/dev/null || echo "")
-    if [[ -n "$TOKEN_MOUNT" ]]; then
-        echo "✅ API Pod Identity token mounted"
-    else
-        echo "❌ API Pod Identity token NOT mounted"
-    fi
+./scripts/test-pod-identity.sh $ENVIRONMENT
+
+echo "[5.9/6] Checking Database Connectivity..."
+# Get DB endpoints from secrets or outputs if available. For this verification script, we can query secretsmanager.
+# But since this script is executed from the host, we can extract it from Terraform outputs.
+cd infra/terraform/envs/$ENVIRONMENT
+AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint 2>/dev/null || echo "")
+REDIS_ENDPOINT=$(terraform output -raw redis_endpoint 2>/dev/null || echo "")
+cd ../../../../
+
+# Create a temporary diagnostic pod with postgres and redis tools
+kubectl delete pod diag-db-test -n motionmesh --ignore-not-found 2>/dev/null
+kubectl run diag-db-test --image=alpine:3.20 -n motionmesh --restart=Never --command -- sleep 300
+kubectl wait --for=condition=Ready pod/diag-db-test -n motionmesh --timeout=60s
+kubectl exec diag-db-test -n motionmesh -- apk add postgresql-client redis
+
+if [[ -n "$AURORA_ENDPOINT" && "$AURORA_ENDPOINT" != "None" ]]; then
+    # Parse just the hostname if it contains a port
+    AURORA_HOST=$(echo $AURORA_ENDPOINT | cut -d':' -f1)
+    # We don't have the password easily unless we parse the secret JSON, so we just check if the port is open using nc
+    kubectl exec diag-db-test -n motionmesh -- nc -zv $AURORA_HOST 5432 && echo "✅ Aurora Network Connectivity SUCCESS" || echo "❌ Aurora Network Connectivity FAILED"
 else
-    echo "⚠️  API Pod not found, skipping pod identity test"
+    echo "⚠️  Aurora endpoint not found in outputs, skipping"
 fi
+
+if [[ -n "$REDIS_ENDPOINT" && "$REDIS_ENDPOINT" != "None" ]]; then
+    REDIS_HOST=$(echo $REDIS_ENDPOINT | cut -d':' -f1)
+    kubectl exec diag-db-test -n motionmesh -- nc -zv $REDIS_HOST 6379 && echo "✅ Redis Network Connectivity SUCCESS" || echo "❌ Redis Network Connectivity FAILED"
+else
+    echo "⚠️  Redis endpoint not found in outputs, skipping"
+fi
+
+echo "--- Checking NATS Connectivity ---"
+kubectl exec diag-db-test -n motionmesh -- nc -zv nats.motionmesh.svc.cluster.local 4222 && echo "✅ NATS Network Connectivity SUCCESS" || echo "❌ NATS Network Connectivity FAILED"
+
+kubectl delete pod diag-db-test -n motionmesh --ignore-not-found 2>/dev/null
 
 echo "[6/6] Checking AWS Load Balancer Controller (WAF/ALB)..."
 ALB_HOST=$(kubectl get ingress motionmesh-api-ingress -n motionmesh -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")

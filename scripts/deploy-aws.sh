@@ -52,6 +52,9 @@ aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
 echo "5. verify EKS"
 kubectl get nodes
 
+echo "5a. Verify EKS Pod Identity Agent Health"
+kubectl rollout status daemonset/eks-pod-identity-agent -n kube-system --timeout=120s
+
 cd ../../../../
 
 echo "6. apply namespace"
@@ -61,6 +64,7 @@ echo "7. cluster addons (Helm)"
 helm repo add eks https://aws.github.io/eks-charts || true
 helm repo add external-secrets https://charts.external-secrets.io || true
 helm repo add bitnami https://charts.bitnami.com/bitnami || true
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ || true
 helm repo update
 
 echo "7a. Install AWS Load Balancer Controller"
@@ -98,6 +102,12 @@ helm upgrade --install external-dns bitnami/external-dns \
   --set policy=sync \
   --set serviceAccount.create=false \
   --set serviceAccount.name=external-dns \
+  --wait
+
+echo "7d. Install Metrics Server"
+helm upgrade --install metrics-server metrics-server/metrics-server \
+  -n kube-system \
+  --set apiService.create=true \
   --wait
 
 echo "8. Apply External Secrets Config"

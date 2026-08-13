@@ -71,11 +71,13 @@ module "waf" {
 }
 
 module "iam" {
-  source          = "../../modules/iam"
-  environment     = var.environment
-  cluster_name    = module.eks.cluster_id
-  s3_bucket_arn   = module.s3.bucket_arn
-  route53_zone_id = var.route53_zone_id
+  source                   = "../../modules/iam"
+  environment              = var.environment
+  cluster_name             = module.eks.cluster_id
+  s3_bucket_arn            = module.s3.bucket_arn
+  route53_zone_id          = var.route53_zone_id
+  oidc_provider_arn        = module.eks.oidc_provider_arn
+  aurora_master_secret_arn = module.aurora.master_user_secret_arn
 }
 
 module "monitoring" {

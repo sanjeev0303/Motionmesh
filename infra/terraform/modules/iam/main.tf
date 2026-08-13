@@ -14,7 +14,7 @@ module "vpc_cni_irsa" {
 
   oidc_providers = {
     main = {
-      provider_arn               = data.aws_iam_openid_connect_provider.eks.arn
+      provider_arn               = var.oidc_provider_arn
       namespace_service_accounts = ["kube-system:aws-node"]
     }
   }
@@ -36,7 +36,7 @@ module "load_balancer_controller_irsa" {
 
   oidc_providers = {
     main = {
-      provider_arn               = data.aws_iam_openid_connect_provider.eks.arn
+      provider_arn               = var.oidc_provider_arn
       namespace_service_accounts = ["kube-system:aws-load-balancer-controller"]
     }
   }
@@ -82,7 +82,6 @@ resource "aws_iam_role_policy" "api_s3" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:HeadObject",
           "s3:PutObject",
           "s3:AbortMultipartUpload",
           "s3:ListBucket"
@@ -122,7 +121,6 @@ resource "aws_iam_role_policy" "worker_s3" {
         Effect = "Allow"
         Action = [
           "s3:GetObject",
-          "s3:HeadObject",
           "s3:PutObject",
           "s3:AbortMultipartUpload",
           "s3:ListBucket",
@@ -144,13 +142,6 @@ resource "aws_eks_pod_identity_association" "worker" {
   role_arn        = aws_iam_role.worker.arn
 }
 
-data "aws_eks_cluster" "this" {
-  name = var.cluster_name
-}
-
-data "aws_iam_openid_connect_provider" "eks" {
-  url = data.aws_eks_cluster.this.identity[0].oidc[0].issuer
-}
 
 # -----------------------------------------------------------------------------
 # External Secrets Role
@@ -175,7 +166,7 @@ resource "aws_iam_role_policy" "external_secrets" {
         ]
         Resource = [
           "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:motionmesh/${var.environment}/*",
-          "arn:aws:secretsmanager:*:${data.aws_caller_identity.current.account_id}:secret:rds!cluster-*"
+          var.aurora_master_secret_arn
         ]
       }
     ]
