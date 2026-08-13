@@ -54,12 +54,13 @@ func main() {
 			break
 		}
 
-		// Update counters for this batch
+		// Update counters for this batch.
+		// Column names must match migration 011: total_objects and total_bytes.
 		updateQuery := `
 			UPDATE buckets b
 			SET total_objects = COALESCE((SELECT COUNT(*) FROM objects o WHERE o.bucket_id = b.id), 0),
-			    total_size_bytes = COALESCE((SELECT SUM(size_bytes) FROM objects o WHERE o.bucket_id = b.id), 0)
-			WHERE b.id = ANY($1)
+			    total_bytes   = COALESCE((SELECT SUM(size_bytes) FROM objects o WHERE o.bucket_id = b.id), 0)
+			WHERE b.id = ANY($1::text[])
 		`
 		tag, err := pool.Exec(ctx, updateQuery, ids)
 		if err != nil {

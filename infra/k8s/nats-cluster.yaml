@@ -15,6 +15,7 @@ spec:
       labels:
         app: nats
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
       - name: nats
         image: nats:2.10-alpine
@@ -27,10 +28,41 @@ spec:
           name: monitor
         args:
           - "-js"
+          - "--store_dir=/data/jetstream"   # Persistent JetStream storage — survives pod restarts
           - "--cluster"
           - "nats://0.0.0.0:6222"
           - "--routes"
           - "nats://nats-0.nats.default.svc.cluster.local:6222,nats://nats-1.nats.default.svc.cluster.local:6222,nats://nats-2.nats.default.svc.cluster.local:6222"
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8222
+          initialDelaySeconds: 10
+          periodSeconds: 15
+        readinessProbe:
+          httpGet:
+            path: /healthz?js-enabled-only=true
+            port: 8222
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: jetstream-data
+          mountPath: /data/jetstream
+  volumeClaimTemplates:
+  - metadata:
+      name: jetstream-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 10Gi
 ---
 apiVersion: v1
 kind: Service
@@ -49,3 +81,13 @@ spec:
   clusterIP: None
   selector:
     app: nats
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: nats-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: nats

@@ -59,17 +59,22 @@ func (r *Repository) RecordUsageEvent(ctx context.Context, event *models.UsageEv
 	if event.ID != "" {
 		id = &event.ID
 	}
-	
+
 	var createdAt *time.Time
 	if !event.CreatedAt.IsZero() {
 		createdAt = &event.CreatedAt
 	}
 
+	var eventID *string
+	if event.EventID != "" {
+		eventID = &event.EventID
+	}
+
 	_, err := r.db.Exec(ctx,
-		`INSERT INTO usage_events (id, account_id, event_type, quantity, metadata, created_at)
-		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, now()))
-		 ON CONFLICT (id) DO NOTHING`,
-		id, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt,
+		`INSERT INTO usage_events (id, account_id, event_type, quantity, metadata, created_at, event_id)
+		 VALUES (COALESCE($1, gen_random_uuid()), $2, $3, $4, $5, COALESCE($6, now()), $7)
+		 ON CONFLICT (event_id) DO NOTHING`,
+		id, event.AccountID, event.EventType, event.Quantity, event.Metadata, createdAt, eventID,
 	)
 	return err
 }

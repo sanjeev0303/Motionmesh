@@ -1,5 +1,5 @@
 import http from 'k6/http';
-import { check } from 'k6';
+import { check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
 import exec from 'k6/execution';
 
@@ -7,16 +7,16 @@ export const options = {
   scenarios: {
     constant_request_rate: {
       executor: 'constant-arrival-rate',
-      rate: 16666,
+      rate: 16667,          // 1,000,000 / 60 ≈ 16,667 RPS
       timeUnit: '1s',
-      duration: '1m',
-      preAllocatedVUs: 5000,
-      maxVUs: 20000,
+      duration: '2m',       // 2-minute sustained run for steady-state measurement
+      preAllocatedVUs: 10000,
+      maxVUs: 25000,
     },
   },
   thresholds: {
-    http_req_duration: ['p(95)<1000'],
-    http_req_failed: ['rate<0.05'],
+    http_req_duration: ['p(95)<500', 'p(99)<1000'],
+    http_req_failed: ['rate<0.01'],   // <1% error rate target
   },
 };
 
@@ -36,19 +36,21 @@ export default function () {
   };
 
   const rand = Math.random();
-  if (rand < 0.8) {
-    // 80% read traffic
-    const res = http.get(`${BASE_URL}/api/v1/videos?limit=10`, params);
-    check(res, { 'status is 200': (r) => r.status === 200 });
+  if (rand < 0.70) {
+    // 70%: list videos (hot read path — should hit Redis/LRU)
+    const res = http.get(`${BASE_URL}/v1/videos?limit=10`, params);
+    check(res, { 'list videos 200': (r) => r.status === 200 });
+  } else if (rand < 0.90) {
+    // 20%: list objects in a specific bucket (tests keyset pagination + authz)
+    const res = http.get(`${BASE_URL}/v1/buckets?limit=5`, params);
+    check(res, { 'list buckets 200': (r) => r.status === 200 });
   } else {
-    // 20% write traffic
+    // 10%: create a video (write path — exercises DB insert + outbox)
     const payload = JSON.stringify({
-      bucket_id: 'default', // Using a default bucket name or ID for the test
-      title: 'Load Test Video',
-      filename: 'load-test.mp4'
+      title: `load-test-${exec.vu.idInTest}-${Date.now()}`,
+      filename: 'load-test.mp4',
     });
-    const res = http.post(`${BASE_URL}/api/v1/videos`, payload, params);
-    // Might fail with 400 or 404 if bucket doesn't exist, just check status
-    check(res, { 'status is 200 or 201': (r) => r.status === 200 || r.status === 201 });
+    const res = http.post(`${BASE_URL}/v1/videos`, payload, params);
+    check(res, { 'create video 2xx': (r) => r.status === 200 || r.status === 201 });
   }
 }

@@ -103,14 +103,19 @@ func (c *Consumer) handleMessage(ctx context.Context, msg *nats.Msg) {
 		keysToDelete = append(keysToDelete, *payload.PreviewKey)
 	}
 
+	var validKeys []string
 	for _, key := range keysToDelete {
 		if key != "" {
-			if err := c.storage.DeleteObject(ctx, key); err != nil {
-				c.log.Error("failed to delete storage key %s for video %s: %v", key, payload.VideoID, err)
-				msg.Nak()
-				metrics.CleanupJobsFailedTotal.Inc()
-				return
-			}
+			validKeys = append(validKeys, key)
+		}
+	}
+
+	if len(validKeys) > 0 {
+		if err := c.storage.DeleteObjects(ctx, validKeys); err != nil {
+			c.log.Error("failed to delete objects for video %s: %v", payload.VideoID, err)
+			msg.Nak()
+			metrics.CleanupJobsFailedTotal.Inc()
+			return
 		}
 	}
 

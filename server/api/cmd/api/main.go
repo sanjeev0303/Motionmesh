@@ -91,8 +91,10 @@ func main() {
 		os.Exit(1)
 	}
 	s3Client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String(cfg.StorageEndpoint)
-		o.UsePathStyle = true // required for B2 and most S3-compatible services
+		if cfg.StorageEndpoint != "" {
+			o.BaseEndpoint = aws.String(cfg.StorageEndpoint)
+		}
+		o.UsePathStyle = cfg.StorageUsePathStyle
 		o.ResponseChecksumValidation = aws.ResponseChecksumValidationWhenRequired
 	})
 	storageAdapter := storage.NewS3Adapter(s3Client, cfg.StorageBucket)

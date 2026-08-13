@@ -18,6 +18,7 @@ type Config struct {
 	StorageBucket    string
 	StorageRegion    string
 	StorageUseSSL    bool
+	StorageUsePathStyle bool
 
 	// Auth
 	ClerkSecretKey string
@@ -61,6 +62,7 @@ func Load() *Config {
 		StorageBucket:    getEnv("STORAGE_BUCKET", "motionmesh-dev"),
 		StorageRegion:    getEnv("STORAGE_REGION", "us-east-005"),
 		StorageUseSSL:    getEnv("STORAGE_USE_SSL", "true") == "true",
+		StorageUsePathStyle: getEnv("STORAGE_USE_PATH_STYLE", "false") == "true",
 
 		ClerkSecretKey: getEnv("CLERK_SECRET_KEY", ""),
 		ClerkJWKSURL:   getEnv("CLERK_JWKS_URL", ""),

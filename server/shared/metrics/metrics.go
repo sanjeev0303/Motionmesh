@@ -68,6 +68,16 @@ var (
 			Help: "Total number of failed cleanup jobs",
 		},
 	)
+
+	// WorkerJobPhaseDuration tracks the latency of different phases in the transcode job.
+	WorkerJobPhaseDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "motionmesh_worker_job_phase_duration_seconds",
+			Help:    "Duration of individual job phases in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"phase"}, // e.g., "download", "probe", "transcode", "upload"
+	)
 )
 
 func init() {
@@ -79,6 +89,7 @@ func init() {
 	Registry.MustRegister(WorkerJobsFailedTotal)
 	Registry.MustRegister(CleanupJobsProcessedTotal)
 	Registry.MustRegister(CleanupJobsFailedTotal)
+	Registry.MustRegister(WorkerJobPhaseDuration)
 }
 
 // Handler returns an http.Handler for exposing Prometheus metrics.

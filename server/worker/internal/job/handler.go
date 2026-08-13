@@ -2,29 +2,30 @@ package job
 
 import (
 	"context"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-	"math/rand"
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/motionmesh/server/shared/branding"
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/models"
+	"github.com/motionmesh/server/shared/outbox"
 	"github.com/motionmesh/server/shared/storage"
 	"github.com/motionmesh/server/worker/internal/captions"
 	"github.com/motionmesh/server/worker/internal/packaging"
 	"github.com/motionmesh/server/worker/internal/transcode"
 	"github.com/motionmesh/server/worker/internal/uploader"
 	"github.com/nats-io/nats.go"
-	"encoding/json"
 )
 
 type Handler struct {
@@ -34,6 +35,8 @@ type Handler struct {
 	captions     *captions.Client
 	brandingRepo branding.BrandingRepository
 	log          *logger.Logger
+	// nc is kept for backwards-compatible construction but billing events are
+	// now written to the outbox table for durable delivery.
 	nc           *nats.Conn
 }
 
@@ -77,9 +80,9 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	}()
 
 	h.log.Info("Starting processing for video: %s", videoID)
-	// 1. Set transcode_jobs.status = processing
-	if err := h.updateJobStatus(ctx, videoID, models.JobStatusProcessing); err != nil {
-		return fmt.Errorf("update job status: %w", err)
+	// 1. Atomic job claim to ensure exclusivity
+	if err := h.claimJob(ctx, videoID); err != nil {
+		return fmt.Errorf("claim job: %w", err)
 	}
 
 	var bucketID string
@@ -103,10 +106,12 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 
 	h.log.Info("Downloading source for video: %s", videoID)
 	// 2. Download source
+	downloadStart := time.Now()
 	sourcePath := filepath.Join(tmpDir, "source.mp4")
 	if err := h.downloadSource(ctx, sourceObjectKey, sourcePath, &bucketID); err != nil {
 		return h.failJob(ctx, videoID, fmt.Errorf("download source: %w", err))
 	}
+	metrics.WorkerJobPhaseDuration.WithLabelValues("download").Observe(time.Since(downloadStart).Seconds())
 
 	// Run Probe, getAccountID, and idempotency check concurrently — all are
 	// independent reads that can overlap while the disk is warm from the download.
@@ -115,6 +120,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 		accountID     string
 		alreadyEncoded bool
 	)
+	probeStart := time.Now()
 	{
 		pg, pgCtx := errgroup.WithContext(ctx)
 		pg.Go(func() error {
@@ -138,6 +144,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 			return h.failJob(ctx, videoID, fmt.Errorf("probe/account/idempotency: %w", err))
 		}
 	}
+	metrics.WorkerJobPhaseDuration.WithLabelValues("probe").Observe(time.Since(probeStart).Seconds())
 
 	// 4. ABR Ladder
 	renditions := transcode.BuildLadder(probeRes.Height)
@@ -163,6 +170,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	// Concurrency 1: Encode and upload HLS
 	if !alreadyEncoded {
 		eg.Go(func() error {
+			encodeStart := time.Now()
 			h.log.Info("Starting HLS encode for video: %s", videoID)
 			_, err := transcode.Encode(egCtx, sourcePath, probeRes, renditions, watermark, tmpDir, func(percent int) {
 				h.updateJobProgress(egCtx, videoID, percent)
@@ -170,6 +178,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 			if err != nil {
 				return fmt.Errorf("encode: %w", err)
 			}
+			metrics.WorkerJobPhaseDuration.WithLabelValues("transcode_hls").Observe(time.Since(encodeStart).Seconds())
 
 			h.log.Info("Saving renditions for video: %s", videoID)
 			if err := h.saveRenditions(egCtx, videoID, renditions); err != nil {
@@ -182,12 +191,14 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 				return fmt.Errorf("master playlist: %w", err)
 			}
 
+			uploadStart := time.Now()
 			h.log.Info("Uploading HLS for video: %s", videoID)
 			// Upload entire HLS directory
 			files, err := h.uploader.UploadHLS(egCtx, videoID, tmpDir, transcodeBucketID)
 			if err != nil {
 				return fmt.Errorf("upload HLS: %w", err)
 			}
+			metrics.WorkerJobPhaseDuration.WithLabelValues("upload_hls").Observe(time.Since(uploadStart).Seconds())
 			objMu.Lock()
 			uploadedObjects = append(uploadedObjects, files...)
 			objMu.Unlock()
@@ -199,6 +210,10 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	// Concurrency 2: Captions (Extract audio + Transcribe + VTT + Chapters)
 	// Runs concurrently with HLS encode but uses minimal CPU (mostly I/O wait on sidecar).
 	eg.Go(func() error {
+		captionsStart := time.Now()
+		defer func() {
+			metrics.WorkerJobPhaseDuration.WithLabelValues("captions").Observe(time.Since(captionsStart).Seconds())
+		}()
 		h.log.Info("Starting captions processing for video: %s", videoID)
 		if err := h.updateCaptionsStatus(egCtx, videoID, "processing"); err != nil {
 			h.log.Error("failed to set captions_status processing: %v", err)
@@ -281,6 +296,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 		thumbMu    sync.Mutex
 	)
 	{
+		thumbnailsStart := time.Now()
 		tg, tgCtx := errgroup.WithContext(ctx)
 		tg.Go(func() error {
 			sp, err := packaging.GenerateSprite(tgCtx, sourcePath, probeRes.Duration, tmpDir)
@@ -328,6 +344,7 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 			return nil
 		})
 		_ = tg.Wait() // errors are logged above; never fatal
+		metrics.WorkerJobPhaseDuration.WithLabelValues("thumbnails").Observe(time.Since(thumbnailsStart).Seconds())
 	}
 
 	h.log.Info("Saving tracked objects for video: %s", videoID)
@@ -345,9 +362,9 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	_ = h.updateJobStatus(ctx, videoID, models.JobStatusCompleted)
 	_ = h.updateJobProgress(ctx, videoID, 100)
 
-	// Publish usage event for billing
+	// Publish usage event for billing via outbox (durable, at-least-once delivery)
 	if accountID != "" {
-		h.publishUsageEvent(accountID, videoID, probeRes.Duration)
+		h.writeUsageEventOutbox(ctx, accountID, videoID, probeRes.Duration)
 	}
 
 	// This was originally logged on every job completion, let's leave it up to the defer block to log success or just sample it here as well.
@@ -363,30 +380,33 @@ type usageEvent struct {
 	Duration  float64 `json:"duration"`
 }
 
-func (h *Handler) publishUsageEvent(accountID, videoID string, duration float64) {
-	if h.nc == nil {
-		h.log.Error("NATS connection is nil, cannot publish usage event")
-		return
-	}
-	
+// writeUsageEventOutbox inserts the billing event into outbox_events inside a
+// short-lived DB transaction. The outbox relay will publish it to JetStream
+// asynchronously with at-least-once delivery guarantees and exponential backoff.
+// This replaces the previous nc.Publish (core NATS, no persistence) pattern.
+func (h *Handler) writeUsageEventOutbox(ctx context.Context, accountID, videoID string, duration float64) {
 	event := usageEvent{
 		AccountID: accountID,
 		VideoID:   videoID,
 		Duration:  duration,
 	}
-	
-	payload, err := json.Marshal(event)
+
+	tx, err := h.db.Begin(ctx)
 	if err != nil {
-		h.log.Error("failed to marshal usage event: %v", err)
+		h.log.Error("writeUsageEventOutbox: begin tx: %v", err)
 		return
 	}
-	
-	err = h.nc.Publish("motionmesh.billing.usage", payload)
-	if err != nil {
-		h.log.Error("failed to publish usage event: %v", err)
-	} else {
-		h.log.Info("Published usage event for video %s, duration %f", videoID, duration)
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if err := outbox.InsertEvent(ctx, tx, "motionmesh.billing.usage", event); err != nil {
+		h.log.Error("writeUsageEventOutbox: insert outbox event: %v", err)
+		return
 	}
+	if err := tx.Commit(ctx); err != nil {
+		h.log.Error("writeUsageEventOutbox: commit: %v", err)
+		return
+	}
+	h.log.Info("Queued usage event outbox for video %s, duration %.2f", videoID, duration)
 }
 
 func (h *Handler) downloadSource(ctx context.Context, objectKey, outPath string, bucketID *string) error {
@@ -545,14 +565,25 @@ func (h *Handler) saveObjectsForJob(ctx context.Context, bucketID string, object
 	return err
 }
 
+func (h *Handler) claimJob(ctx context.Context, videoID string) error {
+	res, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid AND status = $3::text", models.JobStatusProcessing, videoID, models.JobStatusQueued)
+	if err != nil {
+		return err
+	}
+	if res.RowsAffected() == 0 {
+		// If rows affected is 0, it means the job is either already claimed by another worker, or completed/failed.
+		return fmt.Errorf("job not found in pending state or already claimed")
+	}
+	_, err = h.db.Exec(ctx, "UPDATE videos SET status = $1::text, updated_at = now() WHERE id = $2::uuid", models.VideoStatusProcessing, videoID)
+	return err
+}
+
 func (h *Handler) updateJobStatus(ctx context.Context, videoID string, status models.JobStatus) error {
 	_, err := h.db.Exec(ctx, "UPDATE transcode_jobs SET status = $1::text, updated_at = now() WHERE video_id = $2::uuid", status, videoID)
 	if err != nil {
 		return err
 	}
-	if status == models.JobStatusProcessing {
-		_, err = h.db.Exec(ctx, "UPDATE videos SET status = $1::text, updated_at = now() WHERE id = $2::uuid", models.VideoStatusProcessing, videoID)
-	}
+	// Note: We don't update video status to 'processing' here anymore, as claimJob handles it atomically.
 	return err
 }
 

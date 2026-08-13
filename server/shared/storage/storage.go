@@ -21,4 +21,15 @@ type ObjectStorage interface {
 	GetPresignedUploadURL(ctx context.Context, key, contentType string) (string, error)
 	GetCloudFrontSignedURL(ctx context.Context, domain, key, keyID, privateKeyPEM string) (string, error)
 	StatObject(ctx context.Context, key string) (int64, error)
+	CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error)
+	GetPresignedUploadPartURL(ctx context.Context, key, uploadID string, partNumber int) (string, error)
+	UploadPart(ctx context.Context, key, uploadID string, partNumber int, data []byte) (Part, error)
+	CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []Part) error
+	AbortMultipartUpload(ctx context.Context, key, uploadID string) error
+	DeleteObjects(ctx context.Context, keys []string) error
+}
+
+type Part struct {
+	PartNumber int
+	ETag       string
 }

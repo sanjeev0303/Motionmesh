@@ -197,8 +197,100 @@ func (a *S3Adapter) CheckACL(ctx context.Context) error {
 	return nil
 }
 
+func (a *S3Adapter) CreateMultipartUpload(ctx context.Context, key, contentType string) (string, error) {
+	out, err := a.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(a.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+	})
+	if err != nil {
+		return "", err
+	}
+	return *out.UploadId, nil
+}
+
+func (a *S3Adapter) GetPresignedUploadPartURL(ctx context.Context, key, uploadID string, partNumber int) (string, error) {
+	req, err := a.presigner.PresignUploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(a.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(int32(partNumber)),
+	}, s3.WithPresignExpires(15*time.Minute))
+	if err != nil {
+		return "", err
+	}
+	return req.URL, nil
+}
+
+func (a *S3Adapter) UploadPart(ctx context.Context, key, uploadID string, partNumber int, data []byte) (Part, error) {
+	out, err := a.client.UploadPart(ctx, &s3.UploadPartInput{
+		Bucket:     aws.String(a.bucket),
+		Key:        aws.String(key),
+		UploadId:   aws.String(uploadID),
+		PartNumber: aws.Int32(int32(partNumber)),
+		Body:       bytes.NewReader(data),
+	}, func(o *s3.Options) {
+		o.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	})
+	if err != nil {
+		return Part{}, err
+	}
+	return Part{
+		PartNumber: partNumber,
+		ETag:       *out.ETag,
+	}, nil
+}
+
+func (a *S3Adapter) CompleteMultipartUpload(ctx context.Context, key, uploadID string, parts []Part) error {
+	var completedParts []awss3types.CompletedPart
+	for _, p := range parts {
+		completedParts = append(completedParts, awss3types.CompletedPart{
+			ETag:       aws.String(p.ETag),
+			PartNumber: aws.Int32(int32(p.PartNumber)),
+		})
+	}
+	_, err := a.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(a.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+		MultipartUpload: &awss3types.CompletedMultipartUpload{
+			Parts: completedParts,
+		},
+	})
+	return err
+}
+
+func (a *S3Adapter) AbortMultipartUpload(ctx context.Context, key, uploadID string) error {
+	_, err := a.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(a.bucket),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	return err
+}
+
+func (a *S3Adapter) DeleteObjects(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	var objects []awss3types.ObjectIdentifier
+	for _, key := range keys {
+		objects = append(objects, awss3types.ObjectIdentifier{
+			Key: aws.String(key),
+		})
+	}
+	_, err := a.client.DeleteObjects(ctx, &s3.DeleteObjectsInput{
+		Bucket: aws.String(a.bucket),
+		Delete: &awss3types.Delete{
+			Objects: objects,
+			Quiet:   aws.Bool(true),
+		},
+	})
+	return err
+}
+
 // Ensure S3Adapter implements ObjectStorage at compile time.
-var _ interface{ PutObject(context.Context, string, []byte, string) error } = (*S3Adapter)(nil)
+var _ ObjectStorage = (*S3Adapter)(nil)
 
 // keep awss3types imported (used for compile-time check guard)
 var _ = awss3types.Object{}

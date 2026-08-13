@@ -54,12 +54,13 @@ func main() {
 			break
 		}
 
-		// Update counters for this batch
+		// Update counters for this batch.
+		// Exclude soft-deleted videos to keep counters accurate.
 		updateQuery := `
 			UPDATE accounts a
-			SET total_videos = COALESCE((SELECT COUNT(*) FROM videos v WHERE v.account_id = a.id), 0),
-			    total_storage_bytes = COALESCE((SELECT SUM(size_bytes) FROM videos v WHERE v.account_id = a.id), 0)
-			WHERE a.id = ANY($1)
+			SET total_videos       = COALESCE((SELECT COUNT(*) FROM videos v WHERE v.account_id = a.id AND v.deleted_at IS NULL), 0),
+			    total_storage_bytes = COALESCE((SELECT SUM(size_bytes) FROM videos v WHERE v.account_id = a.id AND v.deleted_at IS NULL), 0)
+			WHERE a.id = ANY($1::text[])
 		`
 		tag, err := pool.Exec(ctx, updateQuery, ids)
 		if err != nil {
