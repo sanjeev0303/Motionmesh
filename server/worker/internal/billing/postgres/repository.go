@@ -61,11 +61,11 @@ func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *model
 	}
 
 	if stripeCustomerID != "" {
-		idempKey := event.ID
+		idempKey := event.EventID
 		if idempKey == "" {
-			idempKey = time.Now().String() // fallback if no ID
+			return errors.New("invalid event: missing stable event_id")
 		}
-		
+
 		_, err = tx.Exec(ctx,
 			`INSERT INTO stripe_outbox (account_id, stripe_customer_id, event_type, quantity, idempotency_key, usage_event_id)
 			 VALUES ($1, $2, $3, $4, $5, $6)

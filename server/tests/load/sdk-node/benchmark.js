@@ -11,25 +11,25 @@ const client = new Motionmesh({
   baseURL: API_URL
 });
 
+let currentConcurrency = 0;
 let successCount = 0;
 let errorCount = 0;
+let droppedCount = 0;
+let requestedRPSCount = 0;
 let latencies = [];
 const MAX_SAMPLES = 100000;
 let totalRequests = 0;
 let totalLatencyMs = 0;
-
-// Semaphore to limit concurrency (unbounded promises can cause OOM)
-const MAX_CONCURRENCY = RPS_TARGET * 2;
-let currentConcurrency = 0;
+const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || '500', 10);
 
 async function makeRequest() {
   if (currentConcurrency >= MAX_CONCURRENCY) {
-    // Drop or delay? For a load generator, if we hit max concurrency, we're falling behind.
-    errorCount++;
+    droppedCount++;
     return;
   }
   
   currentConcurrency++;
+  requestedRPSCount++;
   const start = process.hrtime.bigint();
   try {
     // A standard high-volume endpoint
@@ -104,14 +104,23 @@ async function runBenchmark() {
   
   const memUsage = process.memoryUsage();
 
-  console.log('--- SDK Benchmark Results ---');
-  console.log(`Total Requests: ${successCount + errorCount}`);
-  console.log(`Success: ${successCount}`);
-  console.log(`Errors: ${errorCount}`);
-  console.log(`Avg Latency: ${avg.toFixed(2)}ms`);
-  console.log(`p50 Latency: ${p50.toFixed(2)}ms`);
-  console.log(`p95 Latency: ${p95.toFixed(2)}ms`);
-  console.log(`p99 Latency: ${p99.toFixed(2)}ms`);
+  console.log(`\n--- Benchmark Results ---`);
+  console.log(`Requested RPS: ${Math.round(requestedRPSCount / DURATION_SECONDS)}`);
+  console.log(`Actual RPS:    ${Math.round(successCount / DURATION_SECONDS)}`);
+  console.log(`Success:       ${successCount}`);
+  console.log(`Errors:        ${errorCount}`);
+  console.log(`Dropped:       ${droppedCount}`);
+  
+  if (droppedCount > successCount * 0.1) {
+    console.log(`\n[WARNING] LOAD_GENERATOR_SATURATED - SDK benchmark fell behind or was throttled by MAX_CONCURRENCY.`);
+  }
+
+  if (latencies.length > 0) {
+    console.log(`Avg Latency:   ${avg.toFixed(2)}ms`);
+    console.log(`p50 Latency:   ${p50.toFixed(2)}ms`);
+    console.log(`p95 Latency:   ${p95.toFixed(2)}ms`);
+    console.log(`p99 Latency:   ${p99.toFixed(2)}ms`);
+  }
   console.log('--- Resource Usage ---');
   console.log(`Memory (RSS): ${Math.round(memUsage.rss / 1024 / 1024)} MB`);
   console.log(`Memory (HeapUsed): ${Math.round(memUsage.heapUsed / 1024 / 1024)} MB`);

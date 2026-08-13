@@ -18,3 +18,15 @@ variable "database_name" {
   type        = string
   default     = "motionmesh"
 }
+
+variable "engine_version" {
+  description = "Aurora PostgreSQL engine version"
+  type        = string
+  default     = "15.4"
+}
+
+variable "instance_class" {
+  description = "Aurora instance class"
+  type        = string
+  default     = "db.r6g.large"
+}

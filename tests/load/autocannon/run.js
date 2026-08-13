@@ -4,10 +4,12 @@ const path = require('path');
 
 const dataPath = path.join(__dirname, '../k6/data.json');
 let apiKeys = [];
+let videoIds = [];
 
 try {
   const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
   apiKeys = data.api_keys;
+  videoIds = data.video_ids || ['vid_123'];
 } catch (err) {
   console.error('Error reading data.json (run generate-load-data first):', err);
   process.exit(1);
@@ -24,6 +26,26 @@ const instance = autocannon({
     {
       method: 'GET',
       path: '/v1/videos?limit=10',
+      setupRequest: (req, context) => {
+        const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
+        req.headers.Authorization = `Bearer ${apiKey}`;
+        return req;
+      }
+    },
+    {
+      method: 'GET',
+      path: '/v1/videos/placeholder',
+      setupRequest: (req, context) => {
+        const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
+        const videoId = videoIds[Math.floor(Math.random() * videoIds.length)];
+        req.path = `/v1/videos/${videoId}`;
+        req.headers.Authorization = `Bearer ${apiKey}`;
+        return req;
+      }
+    },
+    {
+      method: 'GET',
+      path: '/v1/jobs',
       setupRequest: (req, context) => {
         const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
         req.headers.Authorization = `Bearer ${apiKey}`;

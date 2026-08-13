@@ -15,3 +15,21 @@ variable "availability_zones" {
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
 }
+
+variable "cluster_version" {
+  description = "EKS cluster version"
+  type        = string
+  default     = "1.31"
+}
+
+variable "aurora_engine_version" {
+  description = "Aurora PostgreSQL engine version"
+  type        = string
+  default     = "15.4"
+}
+
+variable "aurora_instance_class" {
+  description = "Aurora instance class"
+  type        = string
+  default     = "db.r6g.large"
+}

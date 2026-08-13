@@ -7,14 +7,11 @@ This document outlines the connection pooling topology for Motionmesh to safely 
 Motionmesh relies on a 3-tier database connection topology:
 
 1. **Application-Level Pools (`pgxpool`)**: Each Go application maintains a bounded pool of connections.
-2. **PgBouncer (Transaction Mode)**: Acts as a central multiplexer, mapping thousands of logical application connections onto a smaller physical pool.
-3. **Physical Database (PostgreSQL/Aurora)**: Sustains a maximum physical connection limit (e.g., 400).
+2. **Physical Database (PostgreSQL/Aurora)**: Sustains a maximum physical connection limit depending on instance size.
 
 ## Connection Budget Calculation
 
-With a target physical database limit of **400 maximum connections**, PgBouncer is configured with:
-- `max_client_conn = 10000`
-- `default_pool_size = 350`
+With a target physical database limit of **~3000 maximum connections** on Aurora depending on ACU/instance class:
 
 ### API Tier
 - **Replicas**: 50 (Maximum HPA)
@@ -33,4 +30,4 @@ With a target physical database limit of **400 maximum connections**, PgBouncer 
 **Total Potential Logical Connections**: ~2,860
 
 ## Conclusion
-Our `2,860` potential logical connections comfortably fit within PgBouncer's `max_client_conn` of `10,000`. PgBouncer will rapidly multiplex these transactions over its `350` physical connections to the Aurora database. Because `pgxpool` utilizes short-lived transactions and `pgbouncer` is in transaction mode, the database will never experience connection starvation, even at peak 20,000 RPS.
+Our `2,860` potential logical connections must fit within Aurora's max_connections limit. Because K8s pods use `pgxpool`, they maintain their own small pools and connection churn is minimized. To sustain this, the Aurora instance must be scaled to support at least `3000` concurrent connections, or PgBouncer must be introduced to K8s in the future.
