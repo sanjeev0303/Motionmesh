@@ -14,13 +14,27 @@ module "eks" {
   enable_irsa = true
 
   eks_managed_node_group_defaults = {
-    ami_type       = "AL2_x86_64"
+    ami_type       = "AL2023_x86_64_STANDARD"
     instance_types = ["m5.large"]
     disk_size      = 50
   }
 
   eks_managed_node_groups = {
-    general = {
+    system = {
+      min_size     = 2
+      max_size     = 5
+      desired_size = 2
+
+      instance_types = ["m6i.large"]
+      capacity_type  = "ON_DEMAND"
+
+      labels = {
+        Environment = var.environment
+        NodeGroup   = "system"
+      }
+    }
+
+    api = {
       min_size     = 3
       max_size     = 20
       desired_size = 3
@@ -30,7 +44,7 @@ module "eks" {
 
       labels = {
         Environment = var.environment
-        NodeGroup   = "general"
+        NodeGroup   = "api"
       }
     }
 
@@ -40,7 +54,7 @@ module "eks" {
       desired_size = 5
 
       instance_types = ["c6i.4xlarge", "c6a.4xlarge"]
-      capacity_type  = "SPOT"
+      capacity_type  = "ON_DEMAND"
 
       labels = {
         Environment = var.environment

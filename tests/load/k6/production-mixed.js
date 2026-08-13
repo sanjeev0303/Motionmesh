@@ -14,6 +14,10 @@ export const options = {
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8080';
 const TOKEN = __ENV.API_KEY || 'test_benchmark_token';
 
+const data = JSON.parse(open('./data.json'));
+const apiKeys = data.api_keys || ['test_benchmark_token'];
+const videoIds = data.video_ids || [];
+
 export function setup() {
   const res = http.get(`${BASE_URL}/health`);
   if (res.status !== 200) {
@@ -22,9 +26,10 @@ export function setup() {
 }
 
 export default function () {
+  const vuApiKey = apiKeys[exec.vu.idInTest % apiKeys.length];
   const params = {
     headers: {
-      'Authorization': `Bearer ${TOKEN}`,
+      'Authorization': `Bearer ${vuApiKey}`,
       'Content-Type': 'application/json',
     },
   };
@@ -38,14 +43,15 @@ export default function () {
       const res = http.get(`${BASE_URL}/v1/videos`, params);
       check(res, { 'GET videos status 200': (r) => r.status === 200 });
     } else if (readRand < 0.6) {
-      const res = http.get(`${BASE_URL}/v1/videos/123`, params);
+      const vid = videoIds.length > 0 ? videoIds[exec.vu.idInTest % videoIds.length] : '123';
+      const res = http.get(`${BASE_URL}/v1/videos/${vid}`, params);
       check(res, { 'GET video status 200 or 404': (r) => r.status === 200 || r.status === 404 });
     } else if (readRand < 0.8) {
       const res = http.get(`${BASE_URL}/v1/jobs`, params);
       check(res, { 'GET jobs status 200': (r) => r.status === 200 });
     } else {
-      const res = http.get(`${BASE_URL}/v1/billing`, params);
-      check(res, { 'GET billing status 200': (r) => r.status === 200 });
+      const res = http.get(`${BASE_URL}/v1/billing/subscription`, params);
+      check(res, { 'GET billing subscription status 200': (r) => r.status === 200 });
     }
   } else {
     // WRITE PATH (10%)

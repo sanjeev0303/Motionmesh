@@ -32,9 +32,10 @@ type Config struct {
 	AnthropicAPIKey    string
 
 	// Scalability & Performance
-	LoadTestMode     bool
+	LoadTestMode      bool
 	WorkerConcurrency int
-	AllowedOrigins       string
+	MediaProxyMode    bool
+	AllowedOrigins    string
 	CloudFrontDomain     string
 	CloudFrontKeyID      string
 	CloudFrontPrivateKey string
@@ -72,7 +73,8 @@ func Load() *Config {
 
 		LoadTestMode:      getEnvBool("LOAD_TEST_MODE", false),
 		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
-		AllowedOrigins:       getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
+		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", true),
+		AllowedOrigins:    getEnv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),
 		CloudFrontDomain:     getEnv("CLOUDFRONT_DOMAIN", ""),
 		CloudFrontKeyID:      getEnv("CLOUDFRONT_KEY_ID", ""),
 		CloudFrontPrivateKey: getEnv("CLOUDFRONT_PRIVATE_KEY", ""),

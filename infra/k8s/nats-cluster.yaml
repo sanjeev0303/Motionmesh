@@ -15,6 +15,13 @@ spec:
       labels:
         app: nats
     spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchLabels:
+                app: nats
+            topologyKey: "kubernetes.io/hostname"
       terminationGracePeriodSeconds: 60
       containers:
       - name: nats
@@ -62,7 +69,7 @@ spec:
       accessModes: ["ReadWriteOnce"]
       resources:
         requests:
-          storage: 10Gi
+          storage: 50Gi
 ---
 apiVersion: v1
 kind: Service

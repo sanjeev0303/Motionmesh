@@ -16,14 +16,32 @@ try {
 const url = process.env.BASE_URL || 'http://localhost:8080';
 
 const instance = autocannon({
-  url: url + '/api/v1/videos?limit=10',
-  connections: 1000, // default
-  pipelining: 1, // default
-  duration: 30, // default
+  url: url,
+  connections: parseInt(process.env.CONNECTIONS) || 1000,
+  pipelining: parseInt(process.env.PIPELINING) || 1,
+  duration: parseInt(process.env.DURATION) || 30,
   requests: [
     {
       method: 'GET',
-      path: '/api/v1/videos?limit=10',
+      path: '/v1/videos?limit=10',
+      setupRequest: (req, context) => {
+        const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
+        req.headers.Authorization = `Bearer ${apiKey}`;
+        return req;
+      }
+    },
+    {
+      method: 'GET',
+      path: '/v1/buckets',
+      setupRequest: (req, context) => {
+        const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
+        req.headers.Authorization = `Bearer ${apiKey}`;
+        return req;
+      }
+    },
+    {
+      method: 'GET',
+      path: '/v1/billing/subscription',
       setupRequest: (req, context) => {
         const apiKey = apiKeys[Math.floor(Math.random() * apiKeys.length)];
         req.headers.Authorization = `Bearer ${apiKey}`;

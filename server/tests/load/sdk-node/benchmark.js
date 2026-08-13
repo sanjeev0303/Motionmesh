@@ -14,6 +14,9 @@ const client = new Motionmesh({
 let successCount = 0;
 let errorCount = 0;
 let latencies = [];
+const MAX_SAMPLES = 100000;
+let totalRequests = 0;
+let totalLatencyMs = 0;
 
 // Semaphore to limit concurrency (unbounded promises can cause OOM)
 const MAX_CONCURRENCY = RPS_TARGET * 2;
@@ -36,7 +39,21 @@ async function makeRequest() {
     errorCount++;
   } finally {
     const end = process.hrtime.bigint();
-    latencies.push(Number(end - start) / 1000000); // ms
+    const latencyMs = Number(end - start) / 1000000;
+    
+    totalRequests++;
+    totalLatencyMs += latencyMs;
+    
+    // Reservoir sampling
+    if (latencies.length < MAX_SAMPLES) {
+      latencies.push(latencyMs);
+    } else {
+      const r = Math.floor(Math.random() * totalRequests);
+      if (r < MAX_SAMPLES) {
+        latencies[r] = latencyMs;
+      }
+    }
+    
     currentConcurrency--;
   }
 }
@@ -83,7 +100,7 @@ async function runBenchmark() {
   const p50 = latencies[Math.floor(latencies.length * 0.5)] || 0;
   const p95 = latencies[Math.floor(latencies.length * 0.95)] || 0;
   const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
-  const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length || 0;
+  const avg = totalRequests > 0 ? totalLatencyMs / totalRequests : 0;
   
   const memUsage = process.memoryUsage();
 

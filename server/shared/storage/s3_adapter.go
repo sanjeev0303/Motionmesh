@@ -172,6 +172,52 @@ func (a *S3Adapter) GetCloudFrontSignedURL(ctx context.Context, domain, key, key
 	return signedURL, nil
 }
 
+func (a *S3Adapter) GetCloudFrontSignedCookies(ctx context.Context, domain, prefix, keyID, privateKeyPEM string) (map[string]string, error) {
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM block containing private key")
+	}
+	privKey, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+	if err != nil {
+		parsedKey, err8 := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err8 == nil {
+			if rsaKey, ok := parsedKey.(*rsa.PrivateKey); ok {
+				privKey = rsaKey
+			}
+		}
+		if privKey == nil {
+			return nil, fmt.Errorf("failed to parse private key: %w", err)
+		}
+	}
+
+	signer := sign.NewCookieSigner(keyID, privKey)
+	
+	// Create a custom policy for the prefix (supports wildcards)
+	resourceURL := fmt.Sprintf("https://%s/%s", domain, prefix)
+	policy := &sign.Policy{
+		Statements: []sign.Statement{
+			{
+				Resource: resourceURL,
+				Condition: sign.Condition{
+					DateLessThan: sign.NewAWSEpochTime(time.Now().Add(1 * time.Hour)),
+				},
+			},
+		},
+	}
+
+	cookies, err := signer.SignWithPolicy(policy)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign CloudFront cookies: %w", err)
+	}
+
+	cookieMap := make(map[string]string)
+	for _, c := range cookies {
+		cookieMap[c.Name] = c.Value
+	}
+	
+	return cookieMap, nil
+}
+
 func (a *S3Adapter) StatObject(ctx context.Context, key string) (int64, error) {
 	out, err := a.client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(a.bucket),

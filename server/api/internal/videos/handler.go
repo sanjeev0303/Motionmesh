@@ -25,14 +25,15 @@ type Handler struct {
 	storage      storage.ObjectStorage
 	transcodeSvc *transcode.Service
 	bucketSvc    *buckets.Service
-	bucketID     string
-	cfDomain     string
-	cfKeyID      string
-	cfPrivateKey string
+	bucketID       string
+	cfDomain       string
+	cfKeyID        string
+	cfPrivateKey   string
+	mediaProxyMode bool
 }
 
-func NewHandler(svc *Service, storage storage.ObjectStorage, transcodeSvc *transcode.Service, bucketSvc *buckets.Service, bucketID, cfDomain, cfKeyID, cfPrivateKey string) *Handler {
-	return &Handler{svc: svc, storage: storage, transcodeSvc: transcodeSvc, bucketSvc: bucketSvc, bucketID: bucketID, cfDomain: cfDomain, cfKeyID: cfKeyID, cfPrivateKey: cfPrivateKey}
+func NewHandler(svc *Service, storage storage.ObjectStorage, transcodeSvc *transcode.Service, bucketSvc *buckets.Service, bucketID, cfDomain, cfKeyID, cfPrivateKey string, mediaProxyMode bool) *Handler {
+	return &Handler{svc: svc, storage: storage, transcodeSvc: transcodeSvc, bucketSvc: bucketSvc, bucketID: bucketID, cfDomain: cfDomain, cfKeyID: cfKeyID, cfPrivateKey: cfPrivateKey, mediaProxyMode: mediaProxyMode}
 }
 
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -49,8 +50,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/{id}/thumbnail", h.HandleGetThumbnail)
 	r.Get("/{id}/playback", h.HandleGetPlaybackInfo)
 	r.Post("/{id}/transcode", h.HandleCreateTranscodeJob)
-	// HLS proxy: serves .m3u8 playlists and .ts segments from S3, solving CORS/auth
-	r.Get("/{id}/hls/*", h.HandleHLSProxy)
+	
+	if h.mediaProxyMode {
+		// HLS proxy: serves .m3u8 playlists and .ts segments from S3, solving CORS/auth
+		r.Get("/{id}/hls/*", h.HandleHLSProxy)
+	}
 }
 
 func (h *Handler) HandleListVideos(w http.ResponseWriter, r *http.Request) {
@@ -478,16 +482,32 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 	var timelineSpritesUrl string
 
 	if h.cfDomain != "" && h.cfKeyID != "" && h.cfPrivateKey != "" {
-		// Use CloudFront signed URLs
-		plKey := fmt.Sprintf("videos/%s/hls/master.m3u8", video.ID)
-		playlistUrl, _ = h.storage.GetCloudFrontSignedURL(r.Context(), h.cfDomain, plKey, h.cfKeyID, h.cfPrivateKey)
+		// Use CloudFront with Signed Cookies to authorize the entire videos/{id}/* prefix
+		prefix := fmt.Sprintf("videos/%s/*", video.ID)
+		cookies, err := h.storage.GetCloudFrontSignedCookies(r.Context(), h.cfDomain, prefix, h.cfKeyID, h.cfPrivateKey)
+		if err == nil {
+			for k, v := range cookies {
+				http.SetCookie(w, &http.Cookie{
+					Name:     k,
+					Value:    v,
+					Path:     "/",
+					Domain:   h.cfDomain,
+					Secure:   true,
+					HttpOnly: true,
+					SameSite: http.SameSiteNoneMode,
+				})
+			}
+		} else {
+			logger.New().Error("failed to generate signed cookies: %v", err)
+		}
+
+		playlistUrl = fmt.Sprintf("https://%s/videos/%s/hls/master.m3u8", h.cfDomain, video.ID)
 		
 		if video.CaptionsStatus == "ready" {
-			capKey := fmt.Sprintf("videos/%s/captions/en.vtt", video.ID)
-			subtitleUrl, _ = h.storage.GetCloudFrontSignedURL(r.Context(), h.cfDomain, capKey, h.cfKeyID, h.cfPrivateKey)
+			subtitleUrl = fmt.Sprintf("https://%s/videos/%s/captions/en.vtt", h.cfDomain, video.ID)
 		}
 		if video.SpriteKey != nil {
-			timelineSpritesUrl, _ = h.storage.GetCloudFrontSignedURL(r.Context(), h.cfDomain, *video.SpriteKey, h.cfKeyID, h.cfPrivateKey)
+			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfDomain, *video.SpriteKey)
 		}
 	} else if h.cfDomain != "" {
 		// Use CloudFront standard URLs
@@ -498,7 +518,7 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 		if video.SpriteKey != nil {
 			timelineSpritesUrl = fmt.Sprintf("https://%s/%s", h.cfDomain, *video.SpriteKey)
 		}
-	} else {
+	} else if h.mediaProxyMode {
 		// Use the HLS proxy URL instead of a presigned S3 URL.
 		// This avoids CORS/401 issues: the browser fetches via our API which signs S3 requests.
 		baseProxyURL := fmt.Sprintf("%s/v1/videos/%s/hls", getProxyBaseURL(r), video.ID)
@@ -509,6 +529,17 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 			subtitleUrl, _ = h.storage.GetPresignedURL(r.Context(), capKey)
 		}
 
+		if video.SpriteKey != nil {
+			timelineSpritesUrl, _ = h.storage.GetPresignedURL(r.Context(), *video.SpriteKey)
+		}
+	} else {
+		// Fallback to S3 presigned URLs if no CloudFront and proxy disabled
+		plKey := fmt.Sprintf("videos/%s/hls/master.m3u8", video.ID)
+		playlistUrl, _ = h.storage.GetPresignedURL(r.Context(), plKey)
+		if video.CaptionsStatus == "ready" {
+			capKey := fmt.Sprintf("videos/%s/captions/en.vtt", video.ID)
+			subtitleUrl, _ = h.storage.GetPresignedURL(r.Context(), capKey)
+		}
 		if video.SpriteKey != nil {
 			timelineSpritesUrl, _ = h.storage.GetPresignedURL(r.Context(), *video.SpriteKey)
 		}

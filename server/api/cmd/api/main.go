@@ -195,7 +195,7 @@ func main() {
 		})
 
 		r.Route("/v1/videos", func(r chi.Router) {
-			videosHandler := videos.NewHandler(videosSvc, storageAdapter, transcodeSvc, bucketSvc, cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey)
+			videosHandler := videos.NewHandler(videosSvc, storageAdapter, transcodeSvc, bucketSvc, cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey, cfg.MediaProxyMode)
 			videosHandler.RegisterRoutes(r)
 		})
 
