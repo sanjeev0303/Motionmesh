@@ -5,9 +5,9 @@ go 1.25.0
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.34
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.33
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.3
 	github.com/google/uuid v1.6.0
+	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/motionmesh/server/shared v0.0.0
 	github.com/nats-io/nats.go v1.52.0
@@ -18,6 +18,7 @@ require (
 
 require (
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.16 // indirect
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.33 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/cloudfront/sign v1.11.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.34 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.22.37 // indirect
