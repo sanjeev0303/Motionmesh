@@ -356,18 +356,9 @@ func (h *Handler) Process(ctx context.Context, videoID string, sourceObjectKey s
 	}
 
 	h.log.Info("Finalizing video for video: %s", videoID)
-	// 12. Finalize Video Status
-	if err := h.finalizeVideo(ctx, videoID, probeRes.Duration, posterKey, spriteKey, previewKey); err != nil {
-		return h.failJob(ctx, videoID, fmt.Errorf("finalize video: %w", err))
-	}
-
-	// 13. Set job status to complete
-	_ = h.updateJobStatus(ctx, videoID, models.JobStatusCompleted)
-	_ = h.updateJobProgress(ctx, videoID, 100)
-
-	// Publish usage event for billing via outbox (durable, at-least-once delivery)
-	if accountID != "" {
-		h.writeUsageEventOutbox(ctx, accountID, videoID, probeRes.Duration)
+	// 12. Finalize Video Status & Complete Job & Write Billing Event Transactionally
+	if err := h.completeJobWithBilling(ctx, videoID, accountID, probeRes.Duration, posterKey, spriteKey, previewKey); err != nil {
+		return h.failJob(ctx, videoID, fmt.Errorf("complete job transaction: %w", err))
 	}
 
 	// This was originally logged on every job completion, let's leave it up to the defer block to log success or just sample it here as well.
@@ -384,35 +375,60 @@ type usageEvent struct {
 	Duration  float64 `json:"duration"`
 }
 
-// writeUsageEventOutbox inserts the billing event into outbox_events inside a
-// short-lived DB transaction. The outbox relay will publish it to JetStream
-// asynchronously with at-least-once delivery guarantees and exponential backoff.
-// This replaces the previous nc.Publish (core NATS, no persistence) pattern.
-func (h *Handler) writeUsageEventOutbox(ctx context.Context, accountID, videoID string, duration float64) {
-	eventID := uuid.New().String()
-	event := usageEvent{
-		EventID:   eventID,
-		AccountID: accountID,
-		VideoID:   videoID,
-		Duration:  duration,
-	}
+// completeJobWithBilling atomically marks the video as ready, the job as completed,
+// and inserts the billing outbox event inside a single transaction.
+func (h *Handler) completeJobWithBilling(ctx context.Context, videoID string, accountID string, duration float64, thumbnail, sprite, preview string) error {
+	var t, s, p *string
+	if thumbnail != "" { t = &thumbnail }
+	if sprite != "" { s = &sprite }
+	if preview != "" { p = &preview }
 
 	tx, err := h.db.Begin(ctx)
 	if err != nil {
-		h.log.Error("writeUsageEventOutbox: begin tx: %v", err)
-		return
+		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := outbox.InsertEvent(ctx, tx, eventID, "motionmesh.billing.usage", event); err != nil {
-		h.log.Error("writeUsageEventOutbox: insert outbox event: %v", err)
-		return
+	// Finalize Video Status
+	_, err = tx.Exec(ctx,
+		`UPDATE videos SET status = $1, duration = $2, thumbnail_key = $3, sprite_key = $4, preview_key = $5, updated_at = now() WHERE id = $6`,
+		models.VideoStatusReady, duration, t, s, p, videoID,
+	)
+	if err != nil {
+		return fmt.Errorf("update videos: %w", err)
 	}
+
+	// Set job status to complete and progress to 100
+	_, err = tx.Exec(ctx,
+		`UPDATE transcode_jobs SET status = $1, progress = 100, updated_at = now() WHERE video_id = $2`,
+		models.JobStatusCompleted, videoID,
+	)
+	if err != nil {
+		return fmt.Errorf("update transcode_jobs: %w", err)
+	}
+
+	// Insert billing event if accountID is present
+	if accountID != "" {
+		eventID := uuid.New().String()
+		event := usageEvent{
+			EventID:   eventID,
+			AccountID: accountID,
+			VideoID:   videoID,
+			Duration:  duration,
+		}
+		if err := outbox.InsertEvent(ctx, tx, eventID, "motionmesh.billing.usage", event); err != nil {
+			return fmt.Errorf("insert outbox event: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
-		h.log.Error("writeUsageEventOutbox: commit: %v", err)
-		return
+		return fmt.Errorf("commit tx: %w", err)
 	}
-	h.log.Info("Queued usage event outbox for video %s, duration %.2f", videoID, duration)
+
+	if accountID != "" {
+		h.log.Info("Queued usage event outbox for video %s, duration %.2f", videoID, duration)
+	}
+	return nil
 }
 
 func (h *Handler) downloadSource(ctx context.Context, objectKey, outPath string, bucketID *string) error {
@@ -659,18 +675,6 @@ func (h *Handler) saveChapters(ctx context.Context, videoID string, chapters []m
 	return err
 }
 
-func (h *Handler) finalizeVideo(ctx context.Context, videoID string, duration float64, thumbnail, sprite, preview string) error {
-	var t, s, p *string
-	if thumbnail != "" { t = &thumbnail }
-	if sprite != "" { s = &sprite }
-	if preview != "" { p = &preview }
-
-	_, err := h.db.Exec(ctx,
-		`UPDATE videos SET status = $1, duration = $2, thumbnail_key = $3, sprite_key = $4, preview_key = $5, updated_at = now() WHERE id = $6`,
-		models.VideoStatusReady, duration, t, s, p, videoID,
-	)
-	return err
-}
 
 // extractAudio demuxes audio from the source into an mp3 for transcription.
 // Uses 2 threads: enough for fast demux without starving the concurrent HLS encode.

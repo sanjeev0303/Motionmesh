@@ -10,7 +10,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
@@ -81,11 +80,6 @@ func main() {
 
 	// ── Object Storage ───────────────────────────────────────────────────────
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			cfg.StorageAccessKey,
-			cfg.StorageSecretKey,
-			"",
-		)),
 		awsconfig.WithRegion(cfg.StorageRegion),
 	)
 	if err != nil {

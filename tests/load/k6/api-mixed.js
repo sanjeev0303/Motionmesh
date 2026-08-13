@@ -17,6 +17,13 @@ const apiKeys = new SharedArray('api keys', function () {
   return JSON.parse(open('./data.json')).api_keys;
 });
 
+export function setup() {
+  const res = http.get(`${BASE_URL}/health`);
+  if (res.status !== 200) {
+    throw new Error(`API is not healthy, status: ${res.status}`);
+  }
+}
+
 export default function () {
   const apiKey = apiKeys[exec.vu.idInTest % apiKeys.length];
   const params = {
@@ -28,25 +35,25 @@ export default function () {
 
   const rand = Math.random();
   if (rand < 0.30) {
-    const res = http.get(`${BASE_URL}/api/v1/videos`, params);
+    const res = http.get(`${BASE_URL}/v1/videos`, params);
     check(res, { 'status is 200': (r) => r.status === 200 });
   } else if (rand < 0.50) {
-    const res = http.get(`${BASE_URL}/api/v1/videos/123`, params);
+    const res = http.get(`${BASE_URL}/v1/videos/123`, params);
     check(res, { 'status is 200 or 404': (r) => r.status === 200 || r.status === 404 });
   } else if (rand < 0.65) {
-    const res = http.get(`${BASE_URL}/api/v1/videos/123/playback`, params);
+    const res = http.get(`${BASE_URL}/v1/videos/123/playback`, params);
     check(res, { 'status is 200 or 404': (r) => r.status === 200 || r.status === 404 });
   } else if (rand < 0.75) {
-    const res = http.get(`${BASE_URL}/api/v1/jobs`, params);
+    const res = http.get(`${BASE_URL}/v1/jobs`, params);
     check(res, { 'status is 200': (r) => r.status === 200 });
   } else if (rand < 0.85) {
-    const res = http.get(`${BASE_URL}/api/v1/buckets`, params);
+    const res = http.get(`${BASE_URL}/v1/buckets`, params);
     check(res, { 'status is 200': (r) => r.status === 200 });
   } else if (rand < 0.90) {
-    const res = http.get(`${BASE_URL}/api/v1/buckets/123/objects`, params);
+    const res = http.get(`${BASE_URL}/v1/buckets/123/objects`, params);
     check(res, { 'status is 200 or 404': (r) => r.status === 200 || r.status === 404 });
   } else if (rand < 0.95) {
-    const res = http.get(`${BASE_URL}/api/v1/billing`, params);
+    const res = http.get(`${BASE_URL}/v1/billing`, params);
     check(res, { 'status is 200': (r) => r.status === 200 });
   } else {
     const res = http.get(`${BASE_URL}/health`);

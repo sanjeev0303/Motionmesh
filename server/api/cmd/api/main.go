@@ -13,7 +13,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -79,11 +78,6 @@ func main() {
 
 	// ── Object Storage (Backblaze B2 via generic S3 API) ─────────────────────
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-			cfg.StorageAccessKey,
-			cfg.StorageSecretKey,
-			"",
-		)),
 		awsconfig.WithRegion(cfg.StorageRegion),
 	)
 	if err != nil {

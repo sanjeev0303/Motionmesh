@@ -20,6 +20,13 @@ const apiKeys = new SharedArray('api keys', function () {
   return JSON.parse(open('./data.json')).api_keys;
 });
 
+export function setup() {
+  const res = http.get(`${BASE_URL}/health`);
+  if (res.status !== 200) {
+    throw new Error(`API is not healthy, status: ${res.status}`);
+  }
+}
+
 export default function () {
   const apiKey = apiKeys[exec.vu.idInTest % apiKeys.length];
   const params = {
@@ -27,7 +34,7 @@ export default function () {
       'Authorization': `Bearer ${apiKey}`,
     },
   };
-  const res = http.get(`${BASE_URL}/api/v1/videos`, params);
+  const res = http.get(`${BASE_URL}/v1/videos`, params);
   check(res, { 'status is 200': (r) => r.status === 200 });
   sleep(5); 
 }

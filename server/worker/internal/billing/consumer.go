@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/motionmesh/server/shared/logger"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/nats-io/nats.go"
@@ -26,14 +25,15 @@ type StripeOutboxEvent struct {
 	Quantity         int64
 	IdempotencyKey   string
 	Attempts         int
+	ClaimToken       string
 }
 
 type Repository interface {
 	GetAccountByID(ctx context.Context, id string) (*models.Account, error)
 	RecordUsageAndStripeEvent(ctx context.Context, event *models.UsageEvent, stripeCustomerID string) error
 	ClaimStripeOutboxEvents(ctx context.Context, batchSize, maxAttempts int) ([]StripeOutboxEvent, error)
-	MarkStripeEventsPublished(ctx context.Context, ids []string) error
-	MarkStripeEventFailed(ctx context.Context, id string, attempts, maxAttempts int, errStr string) error
+	MarkStripeEventsPublished(ctx context.Context, events []StripeOutboxEvent) error
+	MarkStripeEventFailed(ctx context.Context, id, claimToken string, attempts, maxAttempts int, errStr string) error
 }
 
 type cachedAccount struct {
@@ -47,19 +47,20 @@ type Consumer struct {
 	log             *logger.Logger
 	
 	// Account cache
-	accCache map[string]cachedAccount
-	accMu    sync.RWMutex
+	accCache *lru.Cache[string, cachedAccount]
 	accSF    singleflight.Group
 }
 
 func NewConsumer(repo Repository, stripeSecretKey string, log *logger.Logger) *Consumer {
 	stripe.Key = stripeSecretKey
 	
+	cache, _ := lru.New[string, cachedAccount](5000)
+	
 	c := &Consumer{
 		repo:            repo,
 		stripeSecretKey: stripeSecretKey,
 		log:             log,
-		accCache:        make(map[string]cachedAccount),
+		accCache:        cache,
 	}
 	
 	return c
@@ -70,15 +71,18 @@ func (c *Consumer) Stop() {
 }
 
 func (c *Consumer) getAccountCached(ctx context.Context, accountID string) (*models.Account, error) {
-	c.accMu.RLock()
-	cached, ok := c.accCache[accountID]
-	c.accMu.RUnlock()
-	
-	if ok && time.Now().Before(cached.expiresAt) {
-		return cached.acc, nil
+	if cached, ok := c.accCache.Get(accountID); ok {
+		if time.Now().Before(cached.expiresAt) {
+			return cached.acc, nil
+		}
+		c.accCache.Remove(accountID)
 	}
 	
 	v, err, _ := c.accSF.Do(accountID, func() (interface{}, error) {
+		if cached, ok := c.accCache.Get(accountID); ok && time.Now().Before(cached.expiresAt) {
+			return cached.acc, nil
+		}
+
 		acc, err := c.repo.GetAccountByID(ctx, accountID)
 		if err != nil {
 			return nil, err
@@ -87,12 +91,10 @@ func (c *Consumer) getAccountCached(ctx context.Context, accountID string) (*mod
 			return nil, nil
 		}
 		
-		c.accMu.Lock()
-		c.accCache[accountID] = cachedAccount{
+		c.accCache.Add(accountID, cachedAccount{
 			acc:       acc,
 			expiresAt: time.Now().Add(5 * time.Minute),
-		}
-		c.accMu.Unlock()
+		})
 		
 		return acc, nil
 	})
@@ -140,7 +142,7 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 		return
 	}
 
-	var publishedIDs []string
+	var publishedEvents []StripeOutboxEvent
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
@@ -161,7 +163,7 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 			
 			if os.Getenv("STRIPE_MOCK_MODE") == "true" {
 				mu.Lock()
-				publishedIDs = append(publishedIDs, e.ID)
+				publishedEvents = append(publishedEvents, e)
 				mu.Unlock()
 				return
 			}
@@ -179,20 +181,20 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 			
 			if apiErr != nil {
 				c.log.Error("Stripe outbox failed to report meter event %s for %s (attempt %d): %v", e.EventType, e.AccountID, e.Attempts, apiErr)
-				if dbErr := c.repo.MarkStripeEventFailed(ctx, e.ID, e.Attempts, maxAttempts, apiErr.Error()); dbErr != nil {
+				if dbErr := c.repo.MarkStripeEventFailed(ctx, e.ID, e.ClaimToken, e.Attempts, maxAttempts, apiErr.Error()); dbErr != nil {
 					c.log.Error("Failed to mark stripe event failed: %v", dbErr)
 				}
 			} else {
 				mu.Lock()
-				publishedIDs = append(publishedIDs, e.ID)
+				publishedEvents = append(publishedEvents, e)
 				mu.Unlock()
 			}
 		}(ev)
 	}
 	wg.Wait()
 
-	if len(publishedIDs) > 0 {
-		if err := c.repo.MarkStripeEventsPublished(ctx, publishedIDs); err != nil {
+	if len(publishedEvents) > 0 {
+		if err := c.repo.MarkStripeEventsPublished(ctx, publishedEvents); err != nil {
 			c.log.Error("Failed to mark stripe outbox events as published: %v", err)
 		}
 	}
@@ -288,18 +290,12 @@ func (c *Consumer) ConsumeUsageEvents(ctx context.Context, nc *nats.Conn) error 
 					stripeID = *acc.StripeCustomerID
 				}
 
-				var eventID string
-				if ev.EventID != "" {
-					eventID = ev.EventID
-				} else {
-					// Fallback for older events without EventID
-					meta, metaErr := m.Metadata()
-					if metaErr == nil {
-						eventID = fmt.Sprintf("nats_%s_%d", meta.Stream, meta.Sequence.Stream)
-					} else {
-						eventID = uuid.NewMD5(uuid.NameSpaceOID, fmt.Appendf(nil, "%s_%d", ev.VideoID, time.Now().Unix()/300)).String()
-					}
+				if ev.EventID == "" {
+					c.log.Error("invalid message: missing event_id")
+					m.Term()
+					return
 				}
+				eventID := ev.EventID
 
 					err = c.ReportUsage(ctx, eventID, ev.AccountID, "video_transcode_seconds", qty, stripeID)
 					if err != nil {

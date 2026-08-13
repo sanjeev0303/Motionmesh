@@ -9,13 +9,11 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 func main() {
 	cfg, err := config.LoadDefaultConfig(context.TODO(),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("005ced4c487019a0000000001", "K005quHBRTYuZ0BjLMAvOR4z9jl6l0c", "")),
 		config.WithRegion("us-east-005"),
 	)
 	if err != nil {

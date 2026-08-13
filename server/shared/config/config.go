@@ -13,8 +13,6 @@ type Config struct {
 
 	// Object storage — one code path, different values per environment
 	StorageEndpoint  string
-	StorageAccessKey string
-	StorageSecretKey string
 	StorageBucket    string
 	StorageRegion    string
 	StorageUseSSL    bool
@@ -57,8 +55,6 @@ func Load() *Config {
 		QueueURL:    getEnv("QUEUE_URL", "nats://localhost:4222"),
 
 		StorageEndpoint:  getEnv("STORAGE_ENDPOINT", ""),
-		StorageAccessKey: getEnv("STORAGE_ACCESS_KEY", ""),
-		StorageSecretKey: getEnv("STORAGE_SECRET_KEY", ""),
 		StorageBucket:    getEnv("STORAGE_BUCKET", "motionmesh-dev"),
 		StorageRegion:    getEnv("STORAGE_REGION", "us-east-005"),
 		StorageUseSSL:    getEnv("STORAGE_USE_SSL", "true") == "true",

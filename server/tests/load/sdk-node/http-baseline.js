@@ -1,79 +1,63 @@
-import { Motionmesh } from '@motionmesh/sdk';
-import { performance } from 'perf_hooks';
+const http = require('http');
+const https = require('https');
+const axios = require('axios');
+
+// Configure global agents for connection pooling
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 500 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 500 });
 
 const API_URL = process.env.API_URL || 'http://localhost:8080';
 const API_KEY = process.env.API_KEY || 'test_api_key';
 const RPS_TARGET = parseInt(process.env.RPS_TARGET || '1000', 10);
 const DURATION_SECONDS = parseInt(process.env.DURATION_SECONDS || '10', 10);
 
-const client = new Motionmesh({
-  apiKey: API_KEY,
-  baseURL: API_URL
+const client = axios.create({
+  baseURL: API_URL,
+  httpAgent,
+  httpsAgent,
+  headers: {
+    'Authorization': `Bearer ${API_KEY}`,
+    'Content-Type': 'application/json'
+  }
 });
 
 let successCount = 0;
 let errorCount = 0;
 let latencies = [];
 
-// Semaphore to limit concurrency (unbounded promises can cause OOM)
-const MAX_CONCURRENCY = RPS_TARGET * 2;
-let currentConcurrency = 0;
-
 async function makeRequest() {
-  if (currentConcurrency >= MAX_CONCURRENCY) {
-    // Drop or delay? For a load generator, if we hit max concurrency, we're falling behind.
-    errorCount++;
-    return;
-  }
-  
-  currentConcurrency++;
   const start = process.hrtime.bigint();
   try {
     // A standard high-volume endpoint
-    await client.videos.list({ limit: 5 });
+    await client.get('/v1/jobs?limit=5');
     successCount++;
   } catch (err) {
     errorCount++;
   } finally {
     const end = process.hrtime.bigint();
     latencies.push(Number(end - start) / 1000000); // ms
-    currentConcurrency--;
   }
 }
 
 async function runBenchmark() {
   console.log(`Starting SDK Benchmark targeting ${RPS_TARGET} RPS for ${DURATION_SECONDS} seconds...`);
-  
+  const intervalMs = 1000 / RPS_TARGET;
   let running = true;
+  
   setTimeout(() => {
     running = false;
   }, DURATION_SECONDS * 1000);
 
   const promises = [];
   
-  // Token bucket arrival rate controller (smooth scheduler)
-  const intervalMs = 10; // 10ms ticks
-  const tokensPerTick = RPS_TARGET / (1000 / intervalMs);
-  let tokenBucket = 0;
-
   while (running) {
-    const tickStart = performance.now();
-    tokenBucket += tokensPerTick;
-    
-    while (tokenBucket >= 1) {
-      promises.push(makeRequest());
-      tokenBucket -= 1;
+    const batch = [];
+    // Dispatch roughly 10% of RPS target per 100ms
+    for (let i = 0; i < RPS_TARGET / 10; i++) {
+      batch.push(makeRequest());
     }
-    
-    const tickDuration = performance.now() - tickStart;
-    const sleepTime = intervalMs - tickDuration;
-    
-    if (sleepTime > 0) {
-      await new Promise(resolve => setTimeout(resolve, sleepTime));
-    } else {
-      // Yield to event loop even if falling behind
-      await new Promise(resolve => setImmediate(resolve));
-    }
+    promises.push(...batch);
+    await new Promise(resolve => setTimeout(resolve, 100)); // sleep 100ms
   }
 
   console.log("Waiting for requests to finish...");
@@ -84,10 +68,8 @@ async function runBenchmark() {
   const p95 = latencies[Math.floor(latencies.length * 0.95)] || 0;
   const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
   const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length || 0;
-  
-  const memUsage = process.memoryUsage();
 
-  console.log('--- SDK Benchmark Results ---');
+  console.log('--- Benchmark Results ---');
   console.log(`Total Requests: ${successCount + errorCount}`);
   console.log(`Success: ${successCount}`);
   console.log(`Errors: ${errorCount}`);
@@ -95,9 +77,6 @@ async function runBenchmark() {
   console.log(`p50 Latency: ${p50.toFixed(2)}ms`);
   console.log(`p95 Latency: ${p95.toFixed(2)}ms`);
   console.log(`p99 Latency: ${p99.toFixed(2)}ms`);
-  console.log('--- Resource Usage ---');
-  console.log(`Memory (RSS): ${Math.round(memUsage.rss / 1024 / 1024)} MB`);
-  console.log(`Memory (HeapUsed): ${Math.round(memUsage.heapUsed / 1024 / 1024)} MB`);
 }
 
 runBenchmark().catch(console.error);

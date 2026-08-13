@@ -83,7 +83,7 @@ func (r *Repository) RecordUsageAndStripeEvent(ctx context.Context, event *model
 func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, maxAttempts int) ([]billing.StripeOutboxEvent, error) {
 	query := `
 		UPDATE stripe_outbox
-		SET status = 'publishing', claimed_until = NOW() + INTERVAL '30 seconds', updated_at = NOW()
+		SET status = 'publishing', claim_token = gen_random_uuid(), claimed_until = NOW() + INTERVAL '30 seconds', updated_at = NOW()
 		WHERE id IN (
 			SELECT id
 			FROM stripe_outbox
@@ -96,7 +96,7 @@ func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, max
 			FOR UPDATE SKIP LOCKED
 			LIMIT $2
 		)
-		RETURNING id, account_id, stripe_customer_id, event_type, quantity, idempotency_key, attempts
+		RETURNING id, account_id, stripe_customer_id, event_type, quantity, idempotency_key, attempts, claim_token
 	`
 
 	rows, err := r.db.Query(ctx, query, maxAttempts, batchSize)
@@ -108,7 +108,7 @@ func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, max
 	var events []billing.StripeOutboxEvent
 	for rows.Next() {
 		var e billing.StripeOutboxEvent
-		if err := rows.Scan(&e.ID, &e.AccountID, &e.StripeCustomerID, &e.EventType, &e.Quantity, &e.IdempotencyKey, &e.Attempts); err != nil {
+		if err := rows.Scan(&e.ID, &e.AccountID, &e.StripeCustomerID, &e.EventType, &e.Quantity, &e.IdempotencyKey, &e.Attempts, &e.ClaimToken); err != nil {
 			return nil, err
 		}
 		events = append(events, e)
@@ -116,18 +116,27 @@ func (r *Repository) ClaimStripeOutboxEvents(ctx context.Context, batchSize, max
 	return events, rows.Err()
 }
 
-func (r *Repository) MarkStripeEventsPublished(ctx context.Context, ids []string) error {
-	if len(ids) == 0 {
+func (r *Repository) MarkStripeEventsPublished(ctx context.Context, events []billing.StripeOutboxEvent) error {
+	if len(events) == 0 {
 		return nil
 	}
+	ids := make([]string, len(events))
+	tokens := make([]string, len(events))
+	for i, e := range events {
+		ids[i] = e.ID
+		tokens[i] = e.ClaimToken
+	}
 	_, err := r.db.Exec(ctx,
-		`UPDATE stripe_outbox SET status = 'published', updated_at = NOW() WHERE id = ANY($1::uuid[])`,
-		ids,
+		`UPDATE stripe_outbox AS t 
+		 SET status = 'published', updated_at = NOW(), claim_token = NULL 
+		 FROM unnest($1::uuid[], $2::uuid[]) AS u(id, token)
+		 WHERE t.id = u.id AND t.claim_token = u.token`,
+		ids, tokens,
 	)
 	return err
 }
 
-func (r *Repository) MarkStripeEventFailed(ctx context.Context, id string, attempts, maxAttempts int, errStr string) error {
+func (r *Repository) MarkStripeEventFailed(ctx context.Context, id, claimToken string, attempts, maxAttempts int, errStr string) error {
 	newAttempts := attempts + 1
 	status := "failed"
 	if newAttempts >= maxAttempts {
@@ -138,9 +147,9 @@ func (r *Repository) MarkStripeEventFailed(ctx context.Context, id string, attem
 	
 	_, err := r.db.Exec(ctx,
 		`UPDATE stripe_outbox 
-		 SET attempts = $1, status = $2, next_attempt_at = NOW() + INTERVAL '1 second' * $3, last_error = $4, updated_at = NOW()
-		 WHERE id = $5`,
-		newAttempts, status, backoffSeconds, errStr, id,
+		 SET attempts = $1, status = $2, next_attempt_at = NOW() + INTERVAL '1 second' * $3, last_error = $4, updated_at = NOW(), claim_token = NULL
+		 WHERE id = $5 AND claim_token = $6`,
+		newAttempts, status, backoffSeconds, errStr, id, claimToken,
 	)
 	return err
 }

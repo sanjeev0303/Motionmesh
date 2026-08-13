@@ -26,6 +26,13 @@ const apiKeys = new SharedArray('api keys', function () {
   return JSON.parse(open('./data.json')).api_keys;
 });
 
+export function setup() {
+  const res = http.get(`${BASE_URL}/health`);
+  if (res.status !== 200) {
+    throw new Error(`API is not healthy, status: ${res.status}`);
+  }
+}
+
 export default function () {
   const apiKey = apiKeys[exec.vu.idInTest % apiKeys.length];
   const params = {
@@ -36,16 +43,36 @@ export default function () {
   };
 
   const rand = Math.random();
-  if (rand < 0.70) {
-    // 70%: list videos (hot read path — should hit Redis/LRU)
+  if (rand < 0.30) {
+    // 30%: list videos (hot read path — should hit Redis/LRU)
     const res = http.get(`${BASE_URL}/v1/videos?limit=10`, params);
     check(res, { 'list videos 200': (r) => r.status === 200 });
-  } else if (rand < 0.90) {
-    // 20%: list objects in a specific bucket (tests keyset pagination + authz)
-    const res = http.get(`${BASE_URL}/v1/buckets?limit=5`, params);
+  } else if (rand < 0.50) {
+    // 20%: video detail
+    const res = http.get(`${BASE_URL}/v1/videos/123`, params);
+    check(res, { 'video detail 200/404': (r) => r.status === 200 || r.status === 404 });
+  } else if (rand < 0.65) {
+    // 15%: playback
+    const res = http.get(`${BASE_URL}/v1/videos/123/playback`, params);
+    check(res, { 'playback 200/404': (r) => r.status === 200 || r.status === 404 });
+  } else if (rand < 0.75) {
+    // 10%: jobs
+    const res = http.get(`${BASE_URL}/v1/jobs`, params);
+    check(res, { 'list jobs 200': (r) => r.status === 200 });
+  } else if (rand < 0.85) {
+    // 10%: buckets
+    const res = http.get(`${BASE_URL}/v1/buckets`, params);
     check(res, { 'list buckets 200': (r) => r.status === 200 });
+  } else if (rand < 0.90) {
+    // 5%: objects
+    const res = http.get(`${BASE_URL}/v1/buckets/123/objects`, params);
+    check(res, { 'list objects 200/404': (r) => r.status === 200 || r.status === 404 });
+  } else if (rand < 0.95) {
+    // 5%: branding
+    const res = http.get(`${BASE_URL}/v1/branding`, params);
+    check(res, { 'branding 200': (r) => r.status === 200 });
   } else {
-    // 10%: create a video (write path — exercises DB insert + outbox)
+    // 5%: create a video (write path — exercises DB insert + outbox)
     const payload = JSON.stringify({
       title: `load-test-${exec.vu.idInTest}-${Date.now()}`,
       filename: 'load-test.mp4',

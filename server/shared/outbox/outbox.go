@@ -90,7 +90,7 @@ func (r *Relay) Start(ctx context.Context, interval time.Duration) {
 func (r *Relay) processOutbox(ctx context.Context) {
 	query := fmt.Sprintf(`
 		UPDATE outbox_events
-		SET claimed_until = NOW() + INTERVAL '1 minute', status = 'publishing'
+		SET claimed_until = NOW() + INTERVAL '1 minute', status = 'publishing', claim_token = gen_random_uuid()
 		WHERE id IN (
 			SELECT id
 			FROM outbox_events
@@ -104,7 +104,7 @@ func (r *Relay) processOutbox(ctx context.Context) {
 			FOR UPDATE SKIP LOCKED
 			LIMIT %d
 		)
-		RETURNING id, subject, payload, attempts
+		RETURNING id, subject, payload, attempts, claim_token
 	`, r.maxAttempts, r.batchSize)
 
 	rows, err := r.db.Query(ctx, query)
@@ -114,16 +114,17 @@ func (r *Relay) processOutbox(ctx context.Context) {
 	}
 
 	type event struct {
-		id       string
-		subject  string
-		payload  []byte
-		attempts int
+		id         string
+		subject    string
+		payload    []byte
+		attempts   int
+		claimToken string
 	}
 
 	var events []event
 	for rows.Next() {
 		var e event
-		if err := rows.Scan(&e.id, &e.subject, &e.payload, &e.attempts); err != nil {
+		if err := rows.Scan(&e.id, &e.subject, &e.payload, &e.attempts, &e.claimToken); err != nil {
 			r.log.Error("Failed to scan outbox event: %v", err)
 			rows.Close()
 			return
@@ -137,10 +138,10 @@ func (r *Relay) processOutbox(ctx context.Context) {
 	}
 
 	var (
-		mu           sync.Mutex
-		publishedIDs []string
-		failedEvents []event
-		errorMap     = make(map[string]string)
+		mu              sync.Mutex
+		publishedEvents []event
+		failedEvents    []event
+		errorMap        = make(map[string]string)
 	)
 
 	// Bounded concurrency pool for publishing
@@ -184,9 +185,9 @@ func (r *Relay) processOutbox(ctx context.Context) {
 			if pubErr != nil {
 				r.log.Error("Failed to publish outbox event (id: %s, subject: %s): %v", ev.id, ev.subject, pubErr)
 				failedEvents = append(failedEvents, ev)
-				errorMap[ev.id] = err.Error()
+				errorMap[ev.id] = pubErr.Error()
 			} else {
-				publishedIDs = append(publishedIDs, ev.id)
+				publishedEvents = append(publishedEvents, ev)
 			}
 		}(e)
 	}
@@ -194,10 +195,19 @@ func (r *Relay) processOutbox(ctx context.Context) {
 	wg.Wait()
 
 	// 1. Mark published
-	if len(publishedIDs) > 0 {
+	if len(publishedEvents) > 0 {
+		ids := make([]string, len(publishedEvents))
+		tokens := make([]string, len(publishedEvents))
+		for i, e := range publishedEvents {
+			ids[i] = e.id
+			tokens[i] = e.claimToken
+		}
 		_, err = r.db.Exec(ctx,
-			`UPDATE outbox_events SET status = 'published', published_at = NOW() WHERE id = ANY($1::text[])`,
-			publishedIDs,
+			`UPDATE outbox_events AS t
+			 SET status = 'published', published_at = NOW(), claim_token = NULL
+			 FROM unnest($1::text[], $2::uuid[]) AS u(id, token)
+			 WHERE t.id = u.id AND t.claim_token = u.token`,
+			ids, tokens,
 		)
 		if err != nil {
 			r.log.Error("Failed to bulk mark outbox events as published: %v", err)
@@ -218,9 +228,9 @@ func (r *Relay) processOutbox(ctx context.Context) {
 			
 			_, ferr := r.db.Exec(ctx,
 				`UPDATE outbox_events 
-				 SET attempts = $1, status = $2, next_attempt_at = NOW() + INTERVAL '1 second' * $3, last_error = $4
-				 WHERE id = $5`,
-				newAttempts, status, backoffSeconds, errorMap[ev.id], ev.id,
+				 SET attempts = $1, status = $2, next_attempt_at = NOW() + INTERVAL '1 second' * $3, last_error = $4, claim_token = NULL
+				 WHERE id = $5 AND claim_token = $6`,
+				newAttempts, status, backoffSeconds, errorMap[ev.id], ev.id, ev.claimToken,
 			)
 			if ferr != nil {
 				r.log.Error("Failed to update failed outbox event %s: %v", ev.id, ferr)
