@@ -488,7 +488,7 @@ func (h *Handler) HandleGetPlaybackInfo(w http.ResponseWriter, r *http.Request) 
 	if h.cfDomain != "" && h.cfKeyID != "" && h.cfPrivateKey != "" && h.cfMediaDomain != "" {
 		// Use CloudFront with Signed Cookies to authorize the entire videos/{id}/* prefix
 		prefix := fmt.Sprintf("videos/%s/*", video.ID)
-		cookies, err := h.storage.GetCloudFrontSignedCookies(r.Context(), h.cfDomain, prefix, h.cfKeyID, h.cfPrivateKey, h.cfPlaybackTTL)
+		cookies, err := h.storage.GetCloudFrontSignedCookies(r.Context(), h.cfMediaDomain, prefix, h.cfKeyID, h.cfPrivateKey, h.cfPlaybackTTL)
 		if err == nil {
 			for k, v := range cookies {
 				http.SetCookie(w, &http.Cookie{

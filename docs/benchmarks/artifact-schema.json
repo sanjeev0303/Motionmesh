@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Motionmesh Benchmark Artifact",
+  "description": "Standardized schema for recording reproducible benchmark artifacts for investor validation.",
+  "type": "object",
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "benchmark_type": {
+      "type": "string",
+      "enum": ["raw_http_max_throughput", "official_sdk", "nats_publish", "worker_completion"]
+    },
+    "target_rps": {
+      "type": "number",
+      "description": "The requested RPS (or NaN if unbounded/max throughput)"
+    },
+    "actual_rps": {
+      "type": "number",
+      "description": "The actually achieved requests/messages per second"
+    },
+    "duration_s": {
+      "type": "number",
+      "description": "Test duration in seconds"
+    },
+    "requests": {
+      "type": "object",
+      "properties": {
+        "total": { "type": "number" },
+        "success": { "type": "number" },
+        "failed": { "type": "number" },
+        "dropped": { "type": "number" }
+      },
+      "required": ["success", "failed"]
+    },
+    "latency_ms": {
+      "type": "object",
+      "properties": {
+        "p50": { "type": "number" },
+        "p95": { "type": "number" },
+        "p99": { "type": "number" }
+      },
+      "required": ["p50", "p95", "p99"]
+    },
+    "infrastructure": {
+      "type": "object",
+      "properties": {
+        "aws_region": { "type": "string" },
+        "eks_version": { "type": "string" },
+        "aurora_instance_class": { "type": "string" },
+        "worker_count": { "type": "number" }
+      },
+      "description": "Must be populated if running against deployed AWS infra vs local."
+    }
+  },
+  "required": ["timestamp", "benchmark_type", "actual_rps", "duration_s"]
+}

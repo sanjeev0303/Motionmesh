@@ -9,6 +9,16 @@ module "cloudfront" {
   retain_on_delete    = false
   wait_for_deployment = false
 
+  aliases = var.media_domain_name != "" ? [var.media_domain_name] : []
+
+  viewer_certificate = var.acm_certificate_arn != "" ? {
+    acm_certificate_arn      = var.acm_certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
+  } : {
+    cloudfront_default_certificate = true
+  }
+
   create_origin_access_control = true
   origin_access_control = {
     s3_oac = {
@@ -33,9 +43,52 @@ module "cloudfront" {
     cached_methods         = ["GET", "HEAD"]
     compress               = true
     use_forwarded_values   = false
+    
+    # Required to forward CloudFront-* cookies to the viewer for signed cookies
+    forwarded_values = {
+      query_string = false
+      cookies = {
+        forward           = "whitelist"
+        whitelisted_names = ["CloudFront-Key-Pair-Id", "CloudFront-Policy", "CloudFront-Signature"]
+      }
+    }
   }
 
   tags = {
     Environment = var.environment
+  }
+}
+
+# Create a CloudFront Key Group for signed URLs/Cookies
+# Note: For production, keys should be generated and stored securely.
+# This assumes public key will be provided or we create a placeholder if missing.
+resource "tls_private_key" "cloudfront_signer" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "aws_cloudfront_public_key" "this" {
+  comment     = "MotionMesh CloudFront Signer - ${var.environment}"
+  encoded_key = tls_private_key.cloudfront_signer.public_key_pem
+  name        = "motionmesh-signer-${var.environment}"
+}
+
+resource "aws_cloudfront_key_group" "this" {
+  comment = "MotionMesh Signer Key Group - ${var.environment}"
+  items   = [aws_cloudfront_public_key.this.id]
+  name    = "motionmesh-key-group-${var.environment}"
+}
+
+resource "aws_route53_record" "media" {
+  count = var.media_domain_name != "" && var.route53_zone_id != "" ? 1 : 0
+
+  zone_id = var.route53_zone_id
+  name    = var.media_domain_name
+  type    = "A"
+
+  alias {
+    name                   = module.cloudfront.cloudfront_distribution_domain_name
+    zone_id                = module.cloudfront.cloudfront_distribution_hosted_zone_id
+    evaluate_target_health = false
   }
 }

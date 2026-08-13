@@ -3,9 +3,9 @@ module "vpc" {
   name               = "motionmesh-${var.environment}"
   cidr               = var.vpc_cidr
   azs                = var.availability_zones
-  public_subnets     = ["10.2.1.0/24", "10.2.2.0/24"]
-  private_subnets    = ["10.2.3.0/24", "10.2.4.0/24"]
-  database_subnets       = ["10.2.5.0/24", "10.2.6.0/24"]
+  public_subnets     = ["10.2.1.0/24", "10.2.2.0/24", "10.2.3.0/24"]
+  private_subnets    = ["10.2.4.0/24", "10.2.5.0/24", "10.2.6.0/24"]
+  database_subnets       = ["10.2.7.0/24", "10.2.8.0/24", "10.2.9.0/24"]
   single_nat_gateway     = false
   one_nat_gateway_per_az = true
   tags = {
@@ -46,9 +46,12 @@ module "s3" {
 }
 
 module "cloudfront" {
-  source           = "../../modules/cloudfront"
-  environment      = var.environment
-  s3_bucket_domain = module.s3.bucket_domain_name
+  source              = "../../modules/cloudfront"
+  environment         = var.environment
+  s3_bucket_domain    = module.s3.bucket_domain_name
+  media_domain_name   = var.media_domain_name
+  acm_certificate_arn = var.acm_certificate_arn
+  route53_zone_id     = var.route53_zone_id
 }
 
 module "alb" {

@@ -1,8 +1,36 @@
 const { Motionmesh } = require('@motionmesh/sdk');
-
-// Ensure we have deterministic data
 const fs = require('fs');
 const path = require('path');
+const { performance } = require('perf_hooks');
+
+// Reservoir Sampling for Bounded Memory Latency Tracking
+class ReservoirSampler {
+  constructor(capacity = 1024) {
+    this.capacity = capacity;
+    this.reservoir = [];
+    this.count = 0;
+  }
+  
+  add(value) {
+    this.count++;
+    if (this.reservoir.length < this.capacity) {
+      this.reservoir.push(value);
+    } else {
+      const j = Math.floor(Math.random() * this.count);
+      if (j < this.capacity) {
+        this.reservoir[j] = value;
+      }
+    }
+  }
+
+  getPercentile(p) {
+    if (this.reservoir.length === 0) return 0;
+    this.reservoir.sort((a, b) => a - b);
+    return this.reservoir[Math.floor(this.reservoir.length * p)];
+  }
+}
+
+// Data validation
 const dataPath = path.join(__dirname, '../../tests/load/k6/data.json');
 let data = {};
 try {
@@ -18,78 +46,134 @@ if (!data.api_keys || data.api_keys.length === 0) {
 }
 
 const BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
-const NUM_REQUESTS = parseInt(process.env.NUM_REQUESTS || "1000");
-const CONCURRENCY = parseInt(process.env.CONCURRENCY || "50");
-const API_KEY = data.api_keys[0];
+const TIERS = (process.env.RPS_TIERS || '1000,5000,10000,16667,20000').split(',').map(Number);
+const DURATION_SEC = parseInt(process.env.DURATION_SEC || "30");
+const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || "2000");
 
 const client = new Motionmesh({
-  apiKey: API_KEY,
+  apiKey: data.api_keys[0],
   baseURL: BASE_URL,
 });
 
-async function runBenchmark() {
-  console.log(`Starting Official SDK Benchmark...`);
-  console.log(`Base URL: ${BASE_URL}`);
-  console.log(`Target: ${NUM_REQUESTS} requests at concurrency ${CONCURRENCY}`);
+async function runTier(targetRPS) {
+  console.log(`\n==============================================`);
+  console.log(`Starting SDK Benchmark Tier: ${targetRPS} RPS`);
+  console.log(`==============================================`);
 
   let completed = 0;
   let errors = 0;
-  let latencies = [];
-  const start = Date.now();
+  let dropped = 0;
+  let inFlight = 0;
+  const latencies = new ReservoirSampler(1024);
+  
+  const intervalMs = 1000 / targetRPS;
+  const totalRequests = targetRPS * DURATION_SEC;
+  let requestedCount = 0;
 
-  async function worker() {
-    while (true) {
-      if (completed + errors >= NUM_REQUESTS) break;
-      const reqStart = Date.now();
+  const start = performance.now();
+  const endPromise = new Promise(resolve => {
+    const timer = setInterval(async () => {
+      if (requestedCount >= totalRequests) {
+        clearInterval(timer);
+        return;
+      }
+      
+      requestedCount++;
+      
+      if (inFlight >= MAX_CONCURRENCY) {
+        dropped++;
+        return;
+      }
+
+      inFlight++;
+      const reqStart = performance.now();
+      
       try {
         await client.videos.list({ limit: 10 });
         completed++;
-        latencies.push(Date.now() - reqStart);
+        latencies.add(performance.now() - reqStart);
       } catch (err) {
         errors++;
+      } finally {
+        inFlight--;
+        if (completed + errors + dropped >= totalRequests) {
+          resolve();
+        }
       }
-    }
-  }
+    }, intervalMs);
+  });
 
-  const workers = [];
-  for (let i = 0; i < CONCURRENCY; i++) {
-    workers.push(worker());
-  }
-
-  await Promise.all(workers);
+  await endPromise;
   
-  const end = Date.now();
+  const end = performance.now();
   const totalTimeSec = (end - start) / 1000;
-  const rps = (completed + errors) / totalTimeSec;
+  const actualRps = completed / totalTimeSec;
+  
+  const p50 = latencies.getPercentile(0.50);
+  const p95 = latencies.getPercentile(0.95);
+  const p99 = latencies.getPercentile(0.99);
 
-  latencies.sort((a, b) => a - b);
-  const p50 = latencies[Math.floor(latencies.length * 0.50)] || 0;
-  const p95 = latencies[Math.floor(latencies.length * 0.95)] || 0;
-  const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
-
-  console.log("\n--- Official SDK Benchmark Results ---");
-  console.log(`Total Requests: ${completed + errors}`);
+  console.log(`Requested RPS:  ${targetRPS}`);
+  console.log(`Actual RPS:     ${actualRps.toFixed(2)}`);
+  console.log(`Total Requests: ${completed + errors + dropped}`);
   console.log(`Successful:     ${completed}`);
   console.log(`Failed:         ${errors}`);
+  console.log(`Dropped:        ${dropped}`);
   console.log(`Time Elapsed:   ${totalTimeSec.toFixed(2)}s`);
-  console.log(`RPS:            ${rps.toFixed(2)} req/s`);
-  console.log(`Latency p50:    ${p50} ms`);
-  console.log(`Latency p95:    ${p95} ms`);
-  console.log(`Latency p99:    ${p99} ms`);
+  console.log(`Latency p50:    ${p50.toFixed(2)} ms`);
+  console.log(`Latency p95:    ${p95.toFixed(2)} ms`);
+  console.log(`Latency p99:    ${p99.toFixed(2)} ms`);
+  
+  if (dropped > (completed + errors) * 0.05) {
+    console.log(`\n[WARNING] LOAD_GENERATOR_SATURATED - Node.js event loop could not keep up with MAX_CONCURRENCY (${MAX_CONCURRENCY})`);
+  }
 
-  // Write JSON output for aggregators
-  const results = {
-    type: "official_sdk",
-    total_requests: completed + errors,
-    successful: completed,
-    failed: errors,
-    time_elapsed_s: totalTimeSec,
-    rps: rps,
-    latency: {
+  const outDir = path.join(__dirname, '../../docs/benchmarks');
+  if (!fs.existsSync(outDir)) {
+    fs.mkdirSync(outDir, { recursive: true });
+  }
+
+  const report = {
+    timestamp: new Date().toISOString(),
+    benchmark_type: "official_sdk",
+    target_rps: targetRPS,
+    duration_s: totalTimeSec,
+    requests: {
+      requested: targetRPS * DURATION_SEC,
+      success: completed,
+      failed: errors,
+      dropped: dropped
+    },
+    actual_rps: actualRps,
+    latency_ms: {
       p50, p95, p99
+    },
+    system: {
+      cpu_usage: process.cpuUsage(),
+      memory_usage: process.memoryUsage()
     }
   };
-  fs.writeFileSync(path.join(__dirname, 'sdk_benchmark_results.json'), JSON.stringify(results, null, 2));
+
+  const outFile = path.join(outDir, `sdk-benchmark-${targetRPS}-${Date.now()}.json`);
+  fs.writeFileSync(outFile, JSON.stringify(report, null, 2));
+  console.log(`Artifact saved to: ${outFile}`);
 }
 
-runBenchmark().catch(console.error);
+async function runAll() {
+  // Preflight
+  try {
+    await client.videos.list({ limit: 1 });
+    console.log("Pre-flight OK.");
+  } catch (err) {
+    console.error("ABORT: Pre-flight failed.", err.message);
+    process.exit(1);
+  }
+
+  for (const tier of TIERS) {
+    await runTier(tier);
+    // Cool down
+    await new Promise(r => setTimeout(r, 5000));
+  }
+}
+
+runAll().catch(console.error);

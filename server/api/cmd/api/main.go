@@ -185,8 +185,6 @@ func main() {
 		r.Use(auth.Middleware(authSvc, cfg.LoadTestMode,
 			"/health",
 			"/v1/billing/webhook",
-			"/v1/videos/*/hls/*",
-			"/v1/videos/*/hls",
 		))
 		// Auth / API keys
 		r.Route("/v1/api-keys", func(r chi.Router) {
@@ -201,7 +199,7 @@ func main() {
 			}
 			videosHandler := videos.NewHandler(
 				videosSvc, storageAdapter, transcodeSvc, bucketSvc, 
-				cfg.StorageBucket, cfg.CloudFrontDomain, cfg.CloudFrontMediaDomain, 
+				cfg.StorageBucket, cfg.CloudFrontDistributionDomain, cfg.CloudFrontMediaDomain, 
 				cfg.CloudFrontKeyID, cfg.CloudFrontPrivateKey, 
 				cfTTL, cfg.CookieDomain, cfg.MediaProxyMode,
 			)

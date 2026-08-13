@@ -43,6 +43,24 @@ spec:
         env:
         - name: MEDIA_PROXY_MODE
           value: "false"
+        - name: CLOUDFRONT_DISTRIBUTION_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: motionmesh-config
+              key: CLOUDFRONT_DISTRIBUTION_DOMAIN
+              optional: true
+        - name: CLOUDFRONT_MEDIA_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: motionmesh-config
+              key: CLOUDFRONT_MEDIA_DOMAIN
+              optional: true
+        - name: COOKIE_DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              name: motionmesh-config
+              key: COOKIE_DOMAIN
+              optional: true
         resources:
           requests:
             cpu: "2"

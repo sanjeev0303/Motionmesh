@@ -32,12 +32,6 @@ func Middleware(svc *Service, loadTestMode bool, exemptPaths ...string) func(htt
 				next.ServeHTTP(w, r)
 				return
 			}
-			
-			// Exempt HLS proxy routes globally since browsers/players don't send auth headers for video segments
-			if strings.Contains(r.URL.Path, "/hls/") {
-				next.ServeHTTP(w, r)
-				return
-			}
 
 			header := r.Header.Get("Authorization")
 			if !strings.HasPrefix(header, "Bearer ") {
