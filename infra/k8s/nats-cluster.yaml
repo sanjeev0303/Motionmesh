@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: nats
+  namespace: motionmesh
   labels:
     app: nats
 spec:
@@ -15,6 +16,15 @@ spec:
       labels:
         app: nats
     spec:
+      nodeSelector:
+        NodeGroup: system
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: nats
       affinity:
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -35,11 +45,11 @@ spec:
           name: monitor
         args:
           - "-js"
-          - "--store_dir=/data/jetstream"   # Persistent JetStream storage — survives pod restarts
+          - "--store_dir=/data/jetstream"
           - "--cluster"
           - "nats://0.0.0.0:6222"
           - "--routes"
-          - "nats://nats-0.nats.default.svc.cluster.local:6222,nats://nats-1.nats.default.svc.cluster.local:6222,nats://nats-2.nats.default.svc.cluster.local:6222"
+          - "nats://nats-0.nats.motionmesh.svc.cluster.local:6222,nats://nats-1.nats.motionmesh.svc.cluster.local:6222,nats://nats-2.nats.motionmesh.svc.cluster.local:6222"
         resources:
           requests:
             cpu: "500m"
@@ -67,6 +77,7 @@ spec:
       name: jetstream-data
     spec:
       accessModes: ["ReadWriteOnce"]
+      storageClassName: gp3
       resources:
         requests:
           storage: 50Gi
@@ -75,6 +86,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: nats
+  namespace: motionmesh
   labels:
     app: nats
 spec:
@@ -93,6 +105,7 @@ apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: nats-pdb
+  namespace: motionmesh
 spec:
   minAvailable: 2
   selector:

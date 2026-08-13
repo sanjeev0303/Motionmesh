@@ -52,6 +52,18 @@ module "vpc_endpoints" {
       private_dns_enabled = true
       subnet_ids          = module.vpc.private_subnets
       tags                = { Name = "${var.name}-ecr-dkr-vpc-endpoint" }
+    },
+    logs = {
+      service             = "logs"
+      private_dns_enabled = true
+      subnet_ids          = module.vpc.private_subnets
+      tags                = { Name = "${var.name}-logs-vpc-endpoint" }
+    },
+    sts = {
+      service             = "sts"
+      private_dns_enabled = true
+      subnet_ids          = module.vpc.private_subnets
+      tags                = { Name = "${var.name}-sts-vpc-endpoint" }
     }
   }
 

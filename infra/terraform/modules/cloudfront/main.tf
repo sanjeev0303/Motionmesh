@@ -59,17 +59,14 @@ module "cloudfront" {
   }
 }
 
-# Create a CloudFront Key Group for signed URLs/Cookies
-# Note: For production, keys should be generated and stored securely.
-# This assumes public key will be provided or we create a placeholder if missing.
-resource "tls_private_key" "cloudfront_signer" {
-  algorithm = "RSA"
-  rsa_bits  = 2048
+# Derive public key from provided private key
+data "tls_public_key" "this" {
+  private_key_pem = var.cloudfront_signing_private_key
 }
 
 resource "aws_cloudfront_public_key" "this" {
   comment     = "MotionMesh CloudFront Signer - ${var.environment}"
-  encoded_key = tls_private_key.cloudfront_signer.public_key_pem
+  encoded_key = data.tls_public_key.this.public_key_pem
   name        = "motionmesh-signer-${var.environment}"
 }
 
@@ -77,6 +74,18 @@ resource "aws_cloudfront_key_group" "this" {
   comment = "MotionMesh Signer Key Group - ${var.environment}"
   items   = [aws_cloudfront_public_key.this.id]
   name    = "motionmesh-key-group-${var.environment}"
+}
+
+resource "aws_secretsmanager_secret" "cloudfront_signing" {
+  name = "motionmesh/${var.environment}/cloudfront-signing"
+}
+
+resource "aws_secretsmanager_secret_version" "cloudfront_signing" {
+  secret_id     = aws_secretsmanager_secret.cloudfront_signing.id
+  secret_string = jsonencode({
+    key_id      = aws_cloudfront_public_key.this.id
+    private_key = var.cloudfront_signing_private_key
+  })
 }
 
 resource "aws_route53_record" "media" {

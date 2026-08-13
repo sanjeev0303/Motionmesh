@@ -47,7 +47,13 @@ variable "acm_certificate_arn" {
 }
 
 variable "route53_zone_id" {
-  description = "The ID of the Route53 hosted zone to create the alias record in"
+  description = "Route53 Hosted Zone ID for alias records"
   type        = string
   default     = ""
+}
+
+variable "cloudfront_signing_private_key" {
+  description = "PEM encoded RSA private key for CloudFront signed cookies"
+  type        = string
+  sensitive   = true
 }

@@ -13,6 +13,8 @@ module "vpc" {
   }
 }
 
+data "aws_region" "current" {}
+
 module "eks" {
   source          = "../../modules/eks"
   environment     = var.environment
@@ -48,33 +50,54 @@ module "s3" {
 module "cloudfront" {
   source              = "../../modules/cloudfront"
   environment         = var.environment
-  s3_bucket_domain    = module.s3.bucket_domain_name
-  media_domain_name   = var.media_domain_name
-  acm_certificate_arn = var.acm_certificate_arn
-  route53_zone_id     = var.route53_zone_id
+  s3_bucket_domain               = module.s3.bucket_domain_name
+  media_domain_name              = var.media_domain_name
+  acm_certificate_arn            = var.acm_certificate_arn
+  route53_zone_id                = var.route53_zone_id
+  cloudfront_signing_private_key = var.cloudfront_signing_private_key
 }
 
 module "alb" {
-  source      = "../../modules/alb"
-  environment = var.environment
-  vpc_id      = module.vpc.vpc_id
-  subnet_ids  = module.vpc.public_subnets
+  source           = "../../modules/alb"
+  environment      = var.environment
+  vpc_id           = module.vpc.vpc_id
+  subnet_ids       = module.vpc.public_subnets
+  eks_cluster_name = module.eks.cluster_id
+  lbc_role_arn     = module.iam.lbc_role_arn
 }
 
 module "waf" {
   source      = "../../modules/waf"
   environment = var.environment
-  alb_arn     = module.alb.arn
 }
 
 module "iam" {
-  source       = "../../modules/iam"
-  environment  = var.environment
-  cluster_name = module.eks.cluster_id
+  source        = "../../modules/iam"
+  environment   = var.environment
+  cluster_name  = module.eks.cluster_id
+  s3_bucket_arn = module.s3.bucket_arn
 }
 
 module "monitoring" {
   source       = "../../modules/monitoring"
   environment  = var.environment
   cluster_name = module.eks.cluster_id
+}
+
+module "ecr_api" {
+  source          = "../../modules/ecr"
+  environment     = var.environment
+  repository_name = "motionmesh-api"
+}
+
+module "ecr_worker" {
+  source          = "../../modules/ecr"
+  environment     = var.environment
+  repository_name = "motionmesh-worker"
+}
+
+module "ecr_captions" {
+  source          = "../../modules/ecr"
+  environment     = var.environment
+  repository_name = "motionmesh-captions"
 }

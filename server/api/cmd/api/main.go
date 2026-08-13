@@ -46,6 +46,11 @@ func main() {
 	cfg := config.Load()
 	log := logger.New()
 
+	if err := config.Validate(cfg); err != nil {
+		log.Error("configuration validation failed: %v", err)
+		os.Exit(1)
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
@@ -178,12 +183,26 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
-
-
-	// Protected routes — both Clerk JWT and mot_* API key are accepted
+	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
+		if err := db.Ping(r.Context()); err != nil {
+			http.Error(w, "database unreachable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := rdb.Ping(r.Context()).Err(); err != nil {
+			http.Error(w, "redis unreachable", http.StatusServiceUnavailable)
+			return
+		}
+		if !nc.IsConnected() {
+			http.Error(w, "nats disconnected", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ready"}`))
+	})	// Protected routes — both Clerk JWT and mot_* API key are accepted
 	r.Group(func(r chi.Router) {
 		r.Use(auth.Middleware(authSvc, cfg.LoadTestMode,
 			"/health",
+			"/ready",
 			"/v1/billing/webhook",
 		))
 		// Auth / API keys

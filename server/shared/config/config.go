@@ -6,6 +6,8 @@ import (
 )
 
 type Config struct {
+	Environment string
+
 	// Core infrastructure
 	DatabaseURL string
 	RedisURL    string
@@ -32,6 +34,9 @@ type Config struct {
 	AnthropicAPIKey    string
 
 	// Scalability & Performance
+	BenchmarkMode     bool
+	StripeMode        string
+	AIMode            string
 	LoadTestMode      bool
 	WorkerConcurrency int
 	MediaProxyMode    bool
@@ -54,6 +59,8 @@ type Config struct {
 
 func Load() *Config {
 	return &Config{
+		Environment: getEnv("ENVIRONMENT", "development"),
+
 		DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/motionmesh?sslmode=disable"),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		QueueURL:    getEnv("QUEUE_URL", "nats://localhost:4222"),
@@ -74,6 +81,9 @@ func Load() *Config {
 		CaptionsSidecarURL: getEnv("CAPTIONS_SIDECAR_URL", "http://localhost:8000"),
 		AnthropicAPIKey:    getEnv("ANTHROPIC_API_KEY", ""),
 
+		BenchmarkMode:     getEnvBool("BENCHMARK_MODE", false),
+		StripeMode:        getEnv("STRIPE_MODE", "live"),
+		AIMode:            getEnv("AI_MODE", "live"),
 		LoadTestMode:      getEnvBool("LOAD_TEST_MODE", false),
 		WorkerConcurrency: getEnvInt("WORKER_CONCURRENCY", 100),
 		MediaProxyMode:    getEnvBool("MEDIA_PROXY_MODE", false),

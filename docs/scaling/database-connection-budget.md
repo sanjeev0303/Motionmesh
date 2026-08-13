@@ -1,33 +1,41 @@
 # Database Connection Budget
 
-This document outlines the connection pooling topology for Motionmesh to safely sustain 20,000+ RPS without overwhelming the underlying PostgreSQL (Aurora) instance.
+Motionmesh is designed to handle up to 1,000,000 API requests per minute (16,667 RPS). Connection pooling is a critical factor in achieving this throughput without overwhelming the PostgreSQL database.
 
-## Topology
+## Sizing and Calculations
 
-Motionmesh relies on a 3-tier database connection topology:
+- **API Pods**: Up to 50 replicas (HPA scaled)
+- **Worker Pods**: Up to 100 replicas (HPA scaled)
+- **Aurora PostgreSQL (`r6g.large`) Max Connections**: ~2000 connections
 
-1. **Application-Level Pools (`pgxpool`)**: Each Go application maintains a bounded pool of connections.
-2. **Physical Database (PostgreSQL/Aurora)**: Sustains a maximum physical connection limit depending on instance size.
+### Default Budget
 
-## Connection Budget Calculation
+| Service | Max Replicas | Conns per Pod | Total Possible Conns |
+|---------|--------------|---------------|----------------------|
+| API     | 50           | 10            | 500                  |
+| Worker  | 100          | 5             | 500                  |
+| **Total**|              |               | **1000**             |
 
-With a target physical database limit of **~3000 maximum connections** on Aurora depending on ACU/instance class:
+> [!TIP]
+> **Why keep connections low per pod?** Go's `pgxpool` multiplexes many concurrent goroutines over a small number of physical connections very efficiently. Setting `DB_MAX_CONNS` too high actually *degrades* performance due to database context switching.
 
-### API Tier
-- **Replicas**: 50 (Maximum HPA)
-- **`DB_MAX_CONNS` (per pod)**: 15
-- **Maximum Logical Connections**: 50 * 15 = 750
+## Recommended Environment Variables (Production / Benchmark)
 
-### Worker Tier
-- **Replicas**: 100 (Maximum HPA)
-- **`DB_MAX_CONNS` (per pod)**: 20
-- **Maximum Logical Connections**: 100 * 20 = 2000
+```env
+# API
+DB_MAX_CONNS=10
+DB_MIN_CONNS=2
 
-### Sidecars & Auxiliaries
-- **Billing Worker**: 10 pods * 10 conns = 100 logical
-- **Cleanup Worker**: 2 pods * 5 conns = 10 logical
+# Worker
+DB_MAX_CONNS=5
+DB_MIN_CONNS=1
+```
 
-**Total Potential Logical Connections**: ~2,860
+## Future Optimizations (PgBouncer)
 
-## Conclusion
-Our `2,860` potential logical connections must fit within Aurora's max_connections limit. Because K8s pods use `pgxpool`, they maintain their own small pools and connection churn is minimized. To sustain this, the Aurora instance must be scaled to support at least `3000` concurrent connections, or PgBouncer must be introduced to K8s in the future.
+If we scale beyond 100 API pods or need to upgrade the worker concurrency such that the physical connection count exceeds 1500, we must introduce a **PgBouncer** sidecar or central PgBouncer deployment.
+
+When using PgBouncer:
+1. `pgxpool` max connections can be increased.
+2. PgBouncer is configured in `transaction` pooling mode.
+3. The Aurora database handles only a small number of persistent connections from PgBouncer.

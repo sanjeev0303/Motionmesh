@@ -17,3 +17,13 @@ output "cluster_master_username" {
   description = "The database master username"
   value       = module.aurora.cluster_master_username
 }
+
+output "cluster_port" {
+  description = "The database port"
+  value       = module.aurora.cluster_port
+}
+
+output "master_user_secret_arn" {
+  description = "ARN of the Secrets Manager secret for the master DB user"
+  value       = module.aurora.cluster_master_user_secret[0].secret_arn
+}

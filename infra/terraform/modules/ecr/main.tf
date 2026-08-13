@@ -3,6 +3,7 @@ module "ecr" {
   version = "~> 2.0"
 
   repository_name = var.repository_name
+  repository_image_tag_mutability = "IMMUTABLE"
 
   repository_read_write_access_arns = []
   create_lifecycle_policy           = true

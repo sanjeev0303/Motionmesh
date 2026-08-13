@@ -40,7 +40,5 @@ resource "aws_wafv2_web_acl" "this" {
   }
 }
 
-resource "aws_wafv2_web_acl_association" "this" {
-  resource_arn = var.alb_arn
-  web_acl_arn  = aws_wafv2_web_acl.this.arn
-}
+# The association will be done via Kubernetes Ingress annotation:
+# alb.ingress.kubernetes.io/wafv2-acl-arn: <waf_arn>

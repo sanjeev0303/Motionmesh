@@ -12,10 +12,15 @@ module "s3_bucket" {
     enabled = true
   }
 
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+
   cors_rule = [
     {
       allowed_methods = ["GET", "PUT", "POST", "HEAD"]
-      allowed_origins = ["*"]
+      allowed_origins = var.allowed_cors_origins
       allowed_headers = ["*"]
       expose_headers  = ["ETag"]
       max_age_seconds = 3000

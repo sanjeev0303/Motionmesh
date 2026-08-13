@@ -12,3 +12,8 @@ output "bucket_domain_name" {
   description = "The bucket domain name"
   value       = module.s3_bucket.s3_bucket_bucket_domain_name
 }
+
+output "bucket_region" {
+  description = "The AWS region this bucket resides in"
+  value       = module.s3_bucket.s3_bucket_region
+}
