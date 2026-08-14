@@ -35,7 +35,7 @@ type Handler struct {
 	db           *pgxpool.Pool
 	store        storage.ObjectStorage
 	uploader     *uploader.Uploader
-	captions     *captions.Client
+	captions     captions.Provider
 	brandingRepo branding.BrandingRepository
 	log          *logger.Logger
 	// nc is kept for backwards-compatible construction but billing events are
@@ -43,7 +43,7 @@ type Handler struct {
 	nc           *nats.Conn
 }
 
-func NewHandler(db *pgxpool.Pool, store storage.ObjectStorage, up *uploader.Uploader, capClient *captions.Client, brandingRepo branding.BrandingRepository, log *logger.Logger, nc *nats.Conn) *Handler {
+func NewHandler(db *pgxpool.Pool, store storage.ObjectStorage, up *uploader.Uploader, capClient captions.Provider, brandingRepo branding.BrandingRepository, log *logger.Logger, nc *nats.Conn) *Handler {
 	return &Handler{
 		db:           db,
 		store:        store,
