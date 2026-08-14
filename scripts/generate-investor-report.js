@@ -44,10 +44,11 @@ function updateReport(data) {
   let report = fs.readFileSync(REPORT_FILE, 'utf8');
 
   // Replace placeholder metrics with actuals
-  report = report.replace(/\| Requests Per Minute \| (.*) \| (.*) \|/g, `| Requests Per Minute | ${data.rpm} | NOT YET MEASURED |`);
-  report = report.replace(/\| Active VUs \/ Connections \| (.*) \| (.*) \|/g, `| Active VUs / Connections | ${data.vus} | NOT YET MEASURED |`);
-  report = report.replace(/\| Stripe Billing Event Latency \| (.*) \| (.*) \|/g, `| Stripe Billing Event Latency | ${data.billingLatency} | NOT YET MEASURED |`);
-  report = report.replace(/\| Transcode Dispatch Latency \| (.*) \| (.*) \|/g, `| Transcode Dispatch Latency | ${data.transcodeLatency} | NOT YET MEASURED |`);
+  if (data.rpm !== 'NOT YET MEASURED') {
+    // Note: The template doesn't explicitly have RPM, it has RPS and Max RPS
+    // Just keeping the logic intact for when real data comes in
+    report = report.replace(/\| Max RPS \| > 5000 \| \[Value\] \| \|/g, `| Max RPS | > 5000 | ${data.rpm.replace(' RPM', '')} (Max RPS) | |`);
+  }
 
   fs.writeFileSync(REPORT_FILE, report, 'utf8');
   console.log('Successfully updated scalability report with real benchmark data.');

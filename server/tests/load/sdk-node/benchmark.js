@@ -5,6 +5,9 @@ const API_URL = process.env.API_URL || 'http://localhost:8080';
 const API_KEY = process.env.API_KEY || 'test_api_key';
 const RPS_TARGET = parseInt(process.env.RPS_TARGET || '1000', 10);
 const DURATION_SECONDS = parseInt(process.env.DURATION_SECONDS || '10', 10);
+const CLIENT_TYPE = process.env.CLIENT_TYPE || 'sdk'; // 'sdk' or 'http'
+const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || '500', 10);
+const MAX_SAMPLES = 100000;
 
 const client = new motionmesh({
   apiKey: API_KEY,
@@ -12,43 +15,56 @@ const client = new motionmesh({
 });
 
 let currentConcurrency = 0;
-let successCount = 0;
-let errorCount = 0;
+let requestedCount = 0;
+let sentCount = 0;
+let completedCount = 0;
+let successfulCount = 0;
+let failedCount = 0;
 let droppedCount = 0;
-let requestedRPSCount = 0;
+
 let latencies = [];
-const MAX_SAMPLES = 100000;
-let totalRequests = 0;
 let totalLatencyMs = 0;
-const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || '500', 10);
 
 async function makeRequest() {
+  requestedCount++;
+  
   if (currentConcurrency >= MAX_CONCURRENCY) {
     droppedCount++;
     return;
   }
   
   currentConcurrency++;
-  requestedRPSCount++;
+  sentCount++;
+  
   const start = process.hrtime.bigint();
   try {
-    // A standard high-volume endpoint
-    await client.videos.list({ limit: 5 });
-    successCount++;
+    if (CLIENT_TYPE === 'sdk') {
+      await client.videos.list({ limit: 5 });
+      successfulCount++;
+    } else {
+      const res = await fetch(`${API_URL}/v1/videos?limit=5`, {
+        headers: { 'Authorization': `Bearer ${API_KEY}` }
+      });
+      if (res.ok) {
+        successfulCount++;
+      } else {
+        failedCount++;
+      }
+    }
   } catch (err) {
-    errorCount++;
+    failedCount++;
   } finally {
     const end = process.hrtime.bigint();
     const latencyMs = Number(end - start) / 1000000;
     
-    totalRequests++;
+    completedCount++;
     totalLatencyMs += latencyMs;
     
     // Reservoir sampling
     if (latencies.length < MAX_SAMPLES) {
       latencies.push(latencyMs);
     } else {
-      const r = Math.floor(Math.random() * totalRequests);
+      const r = Math.floor(Math.random() * completedCount);
       if (r < MAX_SAMPLES) {
         latencies[r] = latencyMs;
       }
@@ -59,7 +75,7 @@ async function makeRequest() {
 }
 
 async function runBenchmark() {
-  console.log(`Starting SDK Benchmark targeting ${RPS_TARGET} RPS for ${DURATION_SECONDS} seconds...`);
+  console.log(`Starting ${CLIENT_TYPE.toUpperCase()} Benchmark targeting ${RPS_TARGET} RPS for ${DURATION_SECONDS} seconds...`);
   
   let running = true;
   setTimeout(() => {
@@ -100,18 +116,19 @@ async function runBenchmark() {
   const p50 = latencies[Math.floor(latencies.length * 0.5)] || 0;
   const p95 = latencies[Math.floor(latencies.length * 0.95)] || 0;
   const p99 = latencies[Math.floor(latencies.length * 0.99)] || 0;
-  const avg = totalRequests > 0 ? totalLatencyMs / totalRequests : 0;
+  const avg = completedCount > 0 ? totalLatencyMs / completedCount : 0;
   
   const memUsage = process.memoryUsage();
 
   console.log(`\n--- Benchmark Results ---`);
-  console.log(`Requested RPS: ${Math.round(requestedRPSCount / DURATION_SECONDS)}`);
-  console.log(`Actual RPS:    ${Math.round(successCount / DURATION_SECONDS)}`);
-  console.log(`Success:       ${successCount}`);
-  console.log(`Errors:        ${errorCount}`);
-  console.log(`Dropped:       ${droppedCount}`);
+  console.log(`Requested:  ${requestedCount} (${Math.round(requestedCount / DURATION_SECONDS)} req/s)`);
+  console.log(`Sent:       ${sentCount} (${Math.round(sentCount / DURATION_SECONDS)} req/s)`);
+  console.log(`Completed:  ${completedCount}`);
+  console.log(`Successful: ${successfulCount}`);
+  console.log(`Failed:     ${failedCount}`);
+  console.log(`Dropped:    ${droppedCount}`);
   
-  if (droppedCount > successCount * 0.1) {
+  if (droppedCount > sentCount * 0.1) {
     console.log(`\n[WARNING] LOAD_GENERATOR_SATURATED - SDK benchmark fell behind or was throttled by MAX_CONCURRENCY.`);
   }
 

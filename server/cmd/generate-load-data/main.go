@@ -66,6 +66,12 @@ func main() {
 	flag.IntVar(&chunkSize, "chunk", 10000, "Chunk size for batched COPY inserts (memory bound)")
 	flag.Parse()
 
+	if os.Getenv("BENCHMARK_MODE") == "true" {
+		if numAccounts < 100000 || numVideos < 100000 {
+			log.Fatalf("BENCHMARK_MODE=true requires --accounts >= 100000 and --videos >= 100000. Found: accounts=%d, videos=%d", numAccounts, numVideos)
+		}
+	}
+
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		dbURL = "postgres://postgres:postgres@localhost:5432/motionmesh?sslmode=disable"

@@ -21,6 +21,7 @@ const (
 var (
 	lastUsedQueue = make(chan string, lastUsedQueueSize)
 	workerOnce    sync.Once
+	localDebounce sync.Map
 )
 
 func startLastUsedWorker(rdb *redis.Client) {
@@ -37,6 +38,21 @@ func startLastUsedWorker(rdb *redis.Client) {
 				metrics.LastUsedWorkerLatency.Observe(time.Since(start).Seconds())
 			}
 		}()
+
+		// Periodic cleanup for local debounce map to prevent memory leaks over time
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				now := time.Now()
+				localDebounce.Range(func(key, value any) bool {
+					if now.Sub(value.(time.Time)) > lastUsedDebounce {
+						localDebounce.Delete(key)
+					}
+					return true
+				})
+			}
+		}()
 	})
 }
 
@@ -45,6 +61,15 @@ func startLastUsedWorker(rdb *redis.Client) {
 // on the hot path.
 func trackLastUsed(rdb *redis.Client, keyID string) {
 	startLastUsedWorker(rdb)
+
+	now := time.Now()
+	if lastSeen, ok := localDebounce.Load(keyID); ok {
+		if now.Sub(lastSeen.(time.Time)) < lastUsedDebounce {
+			return // Debounced locally, skip enqueueing to Redis worker
+		}
+	}
+	localDebounce.Store(keyID, now)
+
 	select {
 	case lastUsedQueue <- keyID:
 		metrics.LastUsedEnqueueTotal.Inc()
