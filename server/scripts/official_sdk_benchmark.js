@@ -1,4 +1,4 @@
-const { Motionmesh } = require('@motionmesh/sdk');
+const { MotionMeshClient } = require('@motionmesh/sdk');
 const fs = require('fs');
 const path = require('path');
 const { performance } = require('perf_hooks');
@@ -50,7 +50,7 @@ const TIERS = (process.env.RPS_TIERS || '1000,5000,10000,16667,20000').split(','
 const DURATION_SEC = parseInt(process.env.DURATION_SEC || "30");
 const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || "2000");
 
-const client = new Motionmesh({
+const client = new MotionMeshClient({
   apiKey: data.api_keys[0],
   baseURL: BASE_URL,
 });
