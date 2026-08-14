@@ -93,32 +93,86 @@ else
     fail "CloudFront Distribution ID not found for $CF_DOMAIN"
 fi
 
-# P0-1: S3 CloudFront OAC End-to-End Test
-echo "-> Uploading test file for OAC End-to-End verification..."
-TEST_CONTENT="OAC Verification $GIT_SHA"
-echo "$TEST_CONTENT" > /tmp/oac-test.txt
-aws s3 cp /tmp/oac-test.txt s3://$BUCKET_ID/$ENVIRONMENT/oac-test/$GIT_SHA.txt --region $AWS_REGION >/dev/null 2>&1
-if [ $? -eq 0 ]; then
-    pass "Test file uploaded to S3"
-    
-    # Direct S3 GET MUST = 403 (or 400 depending on exact url format, but blocked)
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$BUCKET_ID.s3.$AWS_REGION.amazonaws.com/$ENVIRONMENT/oac-test/$GIT_SHA.txt")
-    if [ "$HTTP_CODE" == "403" ]; then
-        pass "Direct anonymous S3 GET blocked (403)"
+    # P0-1: S3 CloudFront OAC End-to-End Test
+    echo "-> Uploading test file for OAC End-to-End verification..."
+    TEST_CONTENT="OAC Verification $GIT_SHA"
+    echo "$TEST_CONTENT" > /tmp/oac-test.txt
+    aws s3 cp /tmp/oac-test.txt s3://$BUCKET_ID/$ENVIRONMENT/oac-test/$GIT_SHA.txt --region $AWS_REGION >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        pass "Test file uploaded to S3"
+        
+        # Direct S3 GET MUST = 403 (or 400 depending on exact url format, but blocked)
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$BUCKET_ID.s3.$AWS_REGION.amazonaws.com/$ENVIRONMENT/oac-test/$GIT_SHA.txt")
+        if [ "$HTTP_CODE" == "403" ] || [ "$HTTP_CODE" == "400" ]; then
+            pass "Direct anonymous S3 GET blocked ($HTTP_CODE)"
+        else
+            fail "Direct anonymous S3 GET returned $HTTP_CODE (Expected 403/400)"
+        fi
+        
+        CF_URL="https://$CF_DOMAIN/$ENVIRONMENT/oac-test/$GIT_SHA.txt"
+
+        # CloudFront GET (No Cookie) MUST = 403
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$CF_URL")
+        if [ "$HTTP_CODE" == "403" ]; then
+            pass "CloudFront GET without cookie blocked (403)"
+        else
+            fail "CloudFront GET without cookie returned $HTTP_CODE (Expected 403)"
+        fi
+
+        # Generate Signed Cookies
+        echo "-> Generating CloudFront Signed Cookies..."
+        SECRET_JSON=$(aws secretsmanager get-secret-value --secret-id motionmesh/$ENVIRONMENT/cloudfront-signing --region $AWS_REGION --query SecretString --output text 2>/dev/null)
+        if [ -n "$SECRET_JSON" ]; then
+            KEY_ID=$(echo "$SECRET_JSON" | jq -r .key_id)
+            echo "$SECRET_JSON" | jq -r .private_key > /tmp/cf_private_key.pem
+
+            RESOURCE="https://$CF_DOMAIN/$ENVIRONMENT/oac-test/*"
+            EXPIRES=$(date -d '+1 hour' +%s)
+            POLICY="{\"Statement\":[{\"Resource\":\"$RESOURCE\",\"Condition\":{\"DateLessThan\":{\"AWS:EpochTime\":$EXPIRES}}}]}"
+            POLICY_ENCODED=$(echo -n "$POLICY" | base64 -w0 | tr '+=/' '-_~')
+            SIGNATURE=$(echo -n "$POLICY" | openssl dgst -sha1 -sign /tmp/cf_private_key.pem | base64 -w0 | tr '+=/' '-_~')
+
+            COOKIE_HEADER="Cookie: CloudFront-Policy=$POLICY_ENCODED; CloudFront-Signature=$SIGNATURE; CloudFront-Key-Pair-Id=$KEY_ID"
+
+            # Valid cookie = 200
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$COOKIE_HEADER" "$CF_URL")
+            if [ "$HTTP_CODE" == "200" ]; then
+                pass "CloudFront GET with valid signed cookie succeeded (200)"
+            else
+                fail "CloudFront GET with valid signed cookie failed. Returned $HTTP_CODE (Expected 200)"
+            fi
+
+            # Invalid cookie = 403 (tamper with signature)
+            INVALID_COOKIE_HEADER="Cookie: CloudFront-Policy=$POLICY_ENCODED; CloudFront-Signature=${SIGNATURE}INVALID; CloudFront-Key-Pair-Id=$KEY_ID"
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$INVALID_COOKIE_HEADER" "$CF_URL")
+            if [ "$HTTP_CODE" == "403" ]; then
+                pass "CloudFront GET with invalid signature blocked (403)"
+            else
+                fail "CloudFront GET with invalid signature returned $HTTP_CODE (Expected 403)"
+            fi
+
+            # Expired cookie = 403
+            EXPIRED_TIME=$(date -d '-1 hour' +%s)
+            EXPIRED_POLICY="{\"Statement\":[{\"Resource\":\"$RESOURCE\",\"Condition\":{\"DateLessThan\":{\"AWS:EpochTime\":$EXPIRED_TIME}}}]}"
+            EXPIRED_POLICY_ENCODED=$(echo -n "$EXPIRED_POLICY" | base64 -w0 | tr '+=/' '-_~')
+            EXPIRED_SIGNATURE=$(echo -n "$EXPIRED_POLICY" | openssl dgst -sha1 -sign /tmp/cf_private_key.pem | base64 -w0 | tr '+=/' '-_~')
+            EXPIRED_COOKIE_HEADER="Cookie: CloudFront-Policy=$EXPIRED_POLICY_ENCODED; CloudFront-Signature=$EXPIRED_SIGNATURE; CloudFront-Key-Pair-Id=$KEY_ID"
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "$EXPIRED_COOKIE_HEADER" "$CF_URL")
+            if [ "$HTTP_CODE" == "403" ]; then
+                pass "CloudFront GET with expired cookie blocked (403)"
+            else
+                fail "CloudFront GET with expired cookie returned $HTTP_CODE (Expected 403)"
+            fi
+
+            rm -f /tmp/cf_private_key.pem
+        else
+            fail "Failed to retrieve cloudfront-signing secret for cookie generation"
+        fi
+
     else
-        fail "Direct anonymous S3 GET returned $HTTP_CODE (Expected 403)"
+        fail "Failed to upload test file to S3"
     fi
-    
-    # CloudFront GET MUST = 200
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$CF_DOMAIN/$ENVIRONMENT/oac-test/$GIT_SHA.txt")
-    if [ "$HTTP_CODE" == "200" ]; then
-        pass "CloudFront GET succeeded via OAC (200)"
-    else
-        fail "CloudFront GET failed via OAC. Returned $HTTP_CODE (Expected 200)"
-    fi
-else
-    fail "Failed to upload test file to S3"
-fi
 
 
 echo "[5/8] Checking Kubernetes External Secrets..."
