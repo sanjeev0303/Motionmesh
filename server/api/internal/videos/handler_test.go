@@ -48,7 +48,7 @@ func TestHandleGetPlaybackInfo_Authorization(t *testing.T) {
 	svc := NewService(repo)
 	store := &mockStorage{}
 	
-	h := NewHandler(svc, store, nil, nil, "bucket", "cfDomain", "media.motionmesh.com", "cfKey", "cfPrivateKey", 15*time.Minute, ".motionmesh.com", false)
+	h := NewHandler(svc, store, nil, nil, "bucket", "cfDomain", "media.motionmesh.co.in", "cfKey", "cfPrivateKey", 15*time.Minute, ".motionmesh.co.in", false)
 
 	tests := []struct {
 		name           string

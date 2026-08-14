@@ -1,4 +1,4 @@
-import { Motionmesh } from '@motionmesh/sdk';
+import { motionmesh } from '@motionmesh/sdk';
 import { performance } from 'perf_hooks';
 
 const API_URL = process.env.API_URL || 'http://localhost:8080';
@@ -6,7 +6,7 @@ const API_KEY = process.env.API_KEY || 'test_api_key';
 const RPS_TARGET = parseInt(process.env.RPS_TARGET || '1000', 10);
 const DURATION_SECONDS = parseInt(process.env.DURATION_SECONDS || '10', 10);
 
-const client = new Motionmesh({
+const client = new motionmesh({
   apiKey: API_KEY,
   baseURL: API_URL
 });

@@ -51,6 +51,7 @@ type DataExport struct {
 	AccountIDs []string `json:"account_ids"`
 	APIKeys    []string `json:"api_keys"`
 	BucketIDs  []string `json:"bucket_ids"`
+	VideoIDs   []string `json:"video_ids"`
 }
 
 func main() {
@@ -96,6 +97,7 @@ func main() {
 		AccountIDs: make([]string, 0, numAccounts),
 		APIKeys:    make([]string, 0, numAccounts),
 		BucketIDs:  make([]string, 0, numAccounts),
+		VideoIDs:   make([]string, 0, numAccounts),
 	}
 	
 	for i := 0; i < numAccounts; i += chunkSize {
@@ -108,11 +110,13 @@ func main() {
 		accountRows := make([][]any, batchSize)
 		bucketRows := make([][]any, batchSize)
 		apiKeyRows := make([][]any, batchSize)
+		videoRows := make([][]any, batchSize)
 		now := time.Now()
 		
 		for j := 0; j < batchSize; j++ {
 			accID := uuid.New().String()
 			bucketID := uuid.New().String()
+			vidID := uuid.New().String()
 			
 			// Generate API Key
 			prefixBytes := make([]byte, 8)
@@ -130,6 +134,7 @@ func main() {
 			exportData.AccountIDs = append(exportData.AccountIDs, accID)
 			exportData.BucketIDs = append(exportData.BucketIDs, bucketID)
 			exportData.APIKeys = append(exportData.APIKeys, rawKey)
+			exportData.VideoIDs = append(exportData.VideoIDs, vidID)
 			
 			accountRows[j] = []any{
 				accID,
@@ -157,6 +162,19 @@ func main() {
 				prefix,
 				hash,
 				[]string{"*"},
+				now,
+			}
+			
+			videoRows[j] = []any{
+				vidID,
+				accID,
+				bucketID,
+				fmt.Sprintf("raw/%s.mp4", vidID),
+				fmt.Sprintf("Primary Load Test Video %d", i+j),
+				"ready",
+				float32(rand.Intn(3600)),       // up to 1 hour
+				int64(rand.Intn(1024*1024*500)), // up to 500MB
+				now,
 				now,
 			}
 		}
@@ -191,17 +209,28 @@ func main() {
 			log.Fatalf("failed to insert api_keys chunk: %v", err)
 		}
 		
+		_, err = db.CopyFrom(
+			ctx,
+			pgx.Identifier{"videos"},
+			[]string{"id", "account_id", "bucket_id", "object_key", "title", "status", "duration", "size_bytes", "created_at", "updated_at"},
+			pgx.CopyFromRows(videoRows),
+		)
+		if err != nil {
+			log.Fatalf("failed to insert base videos chunk: %v", err)
+		}
+		
 		log.Printf("Inserted accounts %d to %d...", i, end)
 	}
 	
 	log.Printf("Successfully inserted %d accounts and buckets.", numAccounts)
 
-	// 2. Generate Videos in chunks
-	if numVideos > 0 && numAccounts > 0 {
-		for i := 0; i < numVideos; i += chunkSize {
+	// 2. Generate extra Videos in chunks
+	extraVideos := numVideos - numAccounts
+	if extraVideos > 0 && numAccounts > 0 {
+		for i := 0; i < extraVideos; i += chunkSize {
 			end := i + chunkSize
-			if end > numVideos {
-				end = numVideos
+			if end > extraVideos {
+				end = extraVideos
 			}
 			
 			batchSize := end - i
@@ -245,12 +274,12 @@ func main() {
 				pgx.CopyFromRows(videoRows),
 			)
 			if err != nil {
-				log.Fatalf("failed to insert videos chunk %d-%d: %v", i, end, err)
+				log.Fatalf("failed to insert extra videos chunk %d-%d: %v", i, end, err)
 			}
 			
-			log.Printf("Inserted videos %d to %d...", i, end)
+			log.Printf("Inserted extra videos %d to %d...", i, end)
 		}
-		log.Printf("Successfully inserted %d videos.", numVideos)
+		log.Printf("Successfully inserted %d extra videos.", extraVideos)
 	}
 
 	// 3. Write data.json

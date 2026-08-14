@@ -9,7 +9,7 @@ variable "s3_bucket_domain" {
 }
 
 variable "media_domain_name" {
-  description = "The custom domain name for media delivery (e.g., media.motionmesh.com)"
+  description = "The custom domain name for media delivery (e.g., media.motionmesh.co.in)"
   type        = string
   default     = ""
 }

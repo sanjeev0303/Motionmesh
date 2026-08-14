@@ -35,7 +35,7 @@ variable "aurora_instance_class" {
 }
 
 variable "media_domain_name" {
-  description = "The custom media domain name (e.g., media.motionmesh.com)"
+  description = "The custom media domain name (e.g., media.motionmesh.co.in)"
   type        = string
 
   validation {
@@ -65,7 +65,7 @@ variable "route53_zone_id" {
 }
 
 variable "api_domain_name" {
-  description = "The custom API domain name (e.g., api.motionmesh.com)"
+  description = "The custom API domain name (e.g., api.motionmesh.co.in)"
   type        = string
 
   validation {
@@ -75,7 +75,7 @@ variable "api_domain_name" {
 }
 
 variable "dns_domain_name" {
-  description = "The base DNS domain name for ExternalDNS (e.g., motionmesh.com)"
+  description = "The base DNS domain name for ExternalDNS (e.g., motionmesh.co.in)"
   type        = string
 
   validation {
@@ -92,7 +92,7 @@ variable "allowed_cors_origins" {
 
 
 variable "cookie_domain" {
-  description = "The domain for cookies (e.g., .motionmesh.com)"
+  description = "The domain for cookies (e.g., .motionmesh.co.in)"
   type        = string
 
   validation {

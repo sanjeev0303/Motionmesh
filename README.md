@@ -14,10 +14,10 @@
   <p>Upload, store, transcode, stream, and deliver video at scale. Build video platforms without the complexity.</p>
 
   <p>
-    <a href="https://motionmesh.com/docs">Documentation</a> •
-    <a href="https://motionmesh.com">Website</a> •
-    <a href="https://app.motionmesh.com">Dashboard</a> •
-    <a href="https://motionmesh.com/docs/sdk">SDK</a> •
+    <a href="https://motionmesh.co.in/docs">Documentation</a> •
+    <a href="https://motionmesh.co.in">Website</a> •
+    <a href="https://app.motionmesh.co.in">Dashboard</a> •
+    <a href="https://motionmesh.co.in/docs/sdk">SDK</a> •
     <a href="https://discord.gg/motionmesh">Discord</a> •
     <a href="https://github.com/sanjeev0303/motionmesh/discussions">Discussions</a> •
     <a href="https://www.npmjs.com/package/@motionmesh/sdk">@motionmesh/sdk</a> •
@@ -395,14 +395,14 @@ Our production topology is designed for resilience:
 
 Dive deeper into the platform:
 
-- [Getting Started](https://motionmesh.com/docs)
-- [SDK Reference](https://motionmesh.com/docs/sdk)
-- [REST API](https://motionmesh.com/docs/api)
-- [Authentication](https://motionmesh.com/docs/auth)
-- [Deployment](https://motionmesh.com/docs/deployment)
-- [Workers](https://motionmesh.com/docs/workers)
-- [Dashboard](https://motionmesh.com/docs/dashboard)
-- [Player](https://motionmesh.com/docs/player)
+- [Getting Started](https://motionmesh.co.in/docs)
+- [SDK Reference](https://motionmesh.co.in/docs/sdk)
+- [REST API](https://motionmesh.co.in/docs/api)
+- [Authentication](https://motionmesh.co.in/docs/auth)
+- [Deployment](https://motionmesh.co.in/docs/deployment)
+- [Workers](https://motionmesh.co.in/docs/workers)
+- [Dashboard](https://motionmesh.co.in/docs/dashboard)
+- [Player](https://motionmesh.co.in/docs/player)
 
 ---
 
@@ -449,7 +449,7 @@ Join the Motionmesh community:
 - **GitHub Discussions:** [Ask questions and share ideas](https://github.com/sanjeev0303/motionmesh/discussions)
 - **Issues:** [Report bugs](https://github.com/sanjeev0303/motionmesh/issues)
 - **Discord:** [Join the chat](https://discord.gg/motionmesh)
-- **Email:** support@motionmesh.com
+- **Email:** support@motionmesh.co.in
 
 ---
 
@@ -461,7 +461,7 @@ Security is a first-class citizen. We enforce strict Server-to-Server Proxy Patt
 > [!WARNING]
 > **Redis:** Currently operates within a private VPC without transit encryption (TLS) or explicit authentication for the benchmark phase. It is strictly isolated from public access and only reachable by internal worker and API nodes. This configuration is documented here for future security audits and will be hardened in future production releases.
 
-For responsible disclosure, please email `security@motionmesh.com` directly. Do not open public issues for security vulnerabilities.
+For responsible disclosure, please email `security@motionmesh.co.in` directly. Do not open public issues for security vulnerabilities.
 
 ---
 

@@ -29,4 +29,4 @@ print(playback_url)
 
 ## Documentation
 
-For full API reference, authentication patterns, and advanced usage, visit the [Motionmesh Documentation](https://motionmesh.com/docs) and the [main repository](https://github.com/sanjeev0303/motionmesh).
+For full API reference, authentication patterns, and advanced usage, visit the [Motionmesh Documentation](https://motionmesh.co.in/docs) and the [main repository](https://github.com/sanjeev0303/motionmesh).

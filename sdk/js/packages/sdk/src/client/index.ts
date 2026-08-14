@@ -16,32 +16,7 @@ export interface FileMeta {
     size: number;
 }
 
-function getVideoDuration(file: File): Promise<number> {
-    return new Promise((resolve) => {
-        if (!file.type.startsWith("video/")) {
-            resolve(0);
-            return;
-        }
-
-        const video = document.createElement("video");
-        video.preload = "metadata"
-
-        video.onloadedmetadata = () => {
-            URL.revokeObjectURL(video.src);
-            resolve(Math.round(video.duration))
-        };
-
-        video.onerror = () => {
-            URL.revokeObjectURL(video.src);
-            resolve(0)
-        };
-
-        video.src = URL.createObjectURL(file);
-    })
-}
-
 function extractFileMeta(file: File | Buffer | Uint8Array): FileMeta {
-    // Check if running in a browser environment where 'File' is defined
     if (typeof File !== "undefined" && file instanceof File) {
         return {
             filename: file.name,
@@ -49,8 +24,6 @@ function extractFileMeta(file: File | Buffer | Uint8Array): FileMeta {
             size: file.size,
         };
     }
-
-    // Fallback for Node.js Buffer or Uint8Array environments
     return {
         filename: "upload",
         contentType: "application/octet-stream",
@@ -58,247 +31,132 @@ function extractFileMeta(file: File | Buffer | Uint8Array): FileMeta {
     };
 }
 
-class Motionmesh {
-    static async uploadVideo(options: UploadVideoFields, onProgress?: onProgressType, alternateProxyUrl?: string): Promise<UploadVideoResult> {
+export class MotionMeshClient {
+    private apiKey: string;
+    private baseURL: string;
+
+    constructor(options: { apiKey: string, baseURL?: string }) {
+        if (!options.apiKey) {
+            throw new Error("apiKey is required");
+        }
+        this.apiKey = options.apiKey;
+        this.baseURL = options.baseURL || "https://api.motionmesh.co.in/v1";
+    }
+
+    private async request(path: string, options: RequestInit = {}) {
+        const url = `${this.baseURL}${path}`;
+        const headers = new Headers(options.headers);
+        headers.set("Authorization", `Bearer ${this.apiKey}`);
+        
+        if (!(options.body instanceof FormData)) {
+            headers.set("Content-Type", "application/json");
+        }
+
+        const response = await fetch(url, { ...options, headers });
+        if (!response.ok) {
+            await handleApiError(response, "api_request");
+        }
+        
+        // Some endpoints return 204 No Content
+        if (response.status === 204) return null;
+        
+        return response.json();
+    }
+
+    videos = {
+        list: async (options?: { limit?: number; cursor?: string; external_user_id?: string }) => {
+            const queryParams = new URLSearchParams();
+            if (options?.limit) queryParams.append("limit", String(options.limit));
+            if (options?.cursor) queryParams.append("cursor", options.cursor);
+            if (options?.external_user_id) queryParams.append("external_user_id", options.external_user_id);
+            const queryStr = queryParams.toString();
+            const path = queryStr ? `/videos?${queryStr}` : `/videos`;
+            const data = await this.request(path);
+            return data.videos;
+        },
+        get: async (videoId: string) => {
+            return this.request(`/videos/${videoId}`);
+        },
+        playback: async (videoId: string) => {
+            return this.request(`/videos/${videoId}/playback`);
+        }
+    };
+
+    mediaConverter = {
+        createJob: async (videoId: string) => {
+            const data = await this.request(`/videos/${videoId}/transcode`, {
+                method: "POST"
+            });
+            return data;
+        },
+        listJobs: async (options?: { limit?: number }) => {
+            const queryParams = new URLSearchParams();
+            if (options?.limit) queryParams.append("limit", String(options.limit));
+            const queryStr = queryParams.toString();
+            const path = queryStr ? `/jobs?${queryStr}` : `/jobs`;
+            const data = await this.request(path);
+            return data;
+        }
+    };
+
+    buckets = {
+        list: async () => {
+            return this.request(`/buckets`);
+        }
+    };
+
+    async uploadVideo(options: UploadVideoFields, onProgress?: onProgressType): Promise<UploadVideoResult> {
         if (!options.video) {
-            throw new Error(" Video vile is required");
+            throw new Error("Video file is required");
         }
-
-        if (!(options.video instanceof File)) {
-            throw new Error("Invalid video file.");
-        }
-
-        if (!options.video.type.startsWith("video/")) {
-            throw new Error("The video file must need to be a valid video file");
-        }
-
-        if (!options.thumbnail) {
-            throw new Error("thumbnail is required");
-        }
-
-        if (!options.thumbnail.type.startsWith("image/")) {
-            throw new Error("The thumbnail file must need to be a valid image file");
-        }
-
-        if (!options.title || options.title.trim() === "") {
-            throw new Error("Title is required");
-        }
-
-        const videoDuration = await getVideoDuration(options.video);
 
         const {
-            filename: videoFileName,
-            contentType: videoContentType,
-            size: videoSize
+            filename,
+            size
         } = extractFileMeta(options.video);
 
-        const {
-            filename: thumbnailFileName,
-            contentType: thumbnailContentType,
-            size: thumbnailSize
-        } = extractFileMeta(options.thumbnail)
-
-        const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-        const initialResponse = await fetch(requestForwardUrl, {
+        // 1. Initiate multipart upload
+        const initialResponse = await this.request('/videos/multipart', {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
             body: JSON.stringify({
-                ...(() => {
-                    const { video, thumbnail, ...rest } = options;
-                    return rest;
-                })(),
-                videoDuration,
-                videoFileName,
-                videoContentType,
-                videoSize,
-                thumbnailFileName,
-                thumbnailContentType,
-                thumbnailSize,
-                type: "upload",
+                filename,
+                size_bytes: size,
+                bucket_id: (options as any).bucketId,
+                transcode_bucket_id: (options as any).transcodeBucketId,
+                external_user_id: (options as any).externalUserId
             })
-        })
+        });
 
-        if (!initialResponse.ok) {
-            await handleApiError(initialResponse, "initiate")
-        }
+        // 2. Upload file parts directly to S3
+        // In the new API structure, the parts array is returned by /multipart/{id}/parts
+        // We'll determine the number of parts needed based on a default 5MB size
+        const partSize = 5 * 1024 * 1024;
+        const totalParts = Math.ceil(size / partSize);
+        
+        // Fetch part URLs
+        const partsResponse = await this.request(`/videos/multipart/${initialResponse.video.id}/parts?upload_id=${initialResponse.upload_id}&count=${totalParts}`);
+        
+        const uploadData = {
+            objectId: initialResponse.video.id,
+            key: initialResponse.object_key,
+            uploadId: initialResponse.upload_id,
+            parts: partsResponse.parts,
+            partSize
+        };
 
-        const { uploadData } = await initialResponse.json()
+        const { objectId, key, uploadId, completedParts } = await uploadFile(options.video as any, uploadData, onProgress);
 
-        const { objectId, key, uploadId, completedParts } = await uploadFile(options.video, uploadData, onProgress);
-
-        const completeResponse = await fetch(requestForwardUrl, {
+        // 3. Complete multipart upload
+        await this.request(`/videos/multipart/${objectId}/complete`, {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
             body: JSON.stringify({
-                type: "complete",
-                objectId,
-                uploadId,
-                key,
-                parts: completedParts,
-                videoId: uploadData?. videoId,
-            }),
+                upload_id: uploadId,
+                parts: completedParts
+            })
         });
-
-        if (!completeResponse.ok) {
-            await handleApiError(completeResponse, "complete")
-        }
-
-        await completeResponse.json();
-
-        const thumbnailFormData = new FormData();
-        thumbnailFormData.append("type", "upload-thumbnail");
-        thumbnailFormData.append("videoId", uploadData?.videoId);
-        thumbnailFormData.append("thumbnail", options.thumbnail);
-        thumbnailFormData.append("thumbnailFileName", thumbnailFileName);
-        thumbnailFormData.append("thumbnailContentType", thumbnailContentType);
-        thumbnailFormData.append("thumbnailSize", String(thumbnailSize));
-
-        const uploadThumbnailResponse = await fetch(requestForwardUrl, {
-            method: "POST",
-            body: thumbnailFormData,
-        });
-
-        if(!uploadThumbnailResponse.ok){
-            await handleApiError(uploadThumbnailResponse, "complete")
-        }
-
-        await uploadThumbnailResponse.json();
 
         return { key };
     }
-
-    static videos = {
-        listByUser: async (options: { externalUserId: string; limit?: number; cursor?: string }, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    type: "listVideos",
-                    ...options
-                })
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "preview")
-            }
-
-            const data = await response.json();
-            return data.videos;
-        },
-        list: async (options?: { limit?: number; cursor?: string }, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    type: "listAllVideos",
-                    ...(options || {})
-                })
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "preview")
-            }
-
-            const data = await response.json();
-            return data.videos;
-        },
-        dashboardUpload: async (options: { video: File; filename: string; sizeBytes: number; bucketId?: string, transcodeBucketId?: string }, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const formData = new FormData();
-            formData.append("type", "dashboardUpload");
-            formData.append("video", options.video);
-            formData.append("filename", options.filename);
-            formData.append("sizeBytes", String(options.sizeBytes));
-            if (options.bucketId) formData.append("bucketId", options.bucketId);
-            if (options.transcodeBucketId) formData.append("transcodeBucketId", options.transcodeBucketId);
-
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                body: formData,
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "dashboardUpload");
-            }
-
-            const data = await response.json();
-            return data.video;
-        },
-        getPlaybackInfo: async (videoId: string, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    type: "getPlaybackInfo",
-                    videoId,
-                })
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "getPlaybackInfo");
-            }
-
-            const data = await response.json();
-            return data.playbackInfo;
-        }
-    }
-
-    static mediaConverter = {
-        createJob: async (videoId: string, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    type: "createTranscodeJob",
-                    videoId,
-                })
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "createTranscodeJob");
-            }
-
-            const data = await response.json();
-            return data.job;
-        },
-        listJobs: async (limit?: number, alternateProxyUrl?: string) => {
-            const requestForwardUrl = alternateProxyUrl || "/api/motionmesh";
-            const response = await fetch(requestForwardUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    type: "listJobs",
-                    limit,
-                })
-            });
-
-            if (!response.ok) {
-                await handleApiError(response, "listJobs");
-            }
-
-            const data = await response.json();
-            return data.jobs as import("../services/listJobs.js").TranscodeJob[];
-        },
-    }
-
 }
 
-export const motionmesh = Motionmesh;
+export const motionmesh = MotionMeshClient;

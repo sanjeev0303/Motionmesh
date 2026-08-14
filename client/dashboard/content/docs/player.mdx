@@ -22,8 +22,8 @@ import { MotionMeshPlayer } from "@motionmesh/player/react";
 export default function VideoPage({ videoId }: { videoId: string }) {
   return (
     <MotionMeshPlayer
-      src={`https://api.motionmesh.io/v1/videos/${videoId}/hls/master.m3u8`}
-      poster={`https://api.motionmesh.io/v1/buckets/default/objects/videos/${videoId}/poster.jpg`}
+      src={`https://api.motionmesh.co.in/v1/videos/${videoId}/hls/master.m3u8`}
+      poster={`https://api.motionmesh.co.in/v1/buckets/default/objects/videos/${videoId}/poster.jpg`}
     />
   );
 }
@@ -62,10 +62,10 @@ type Chapter = {
 
 ```tsx
 <MotionMeshPlayer
-  src="https://api.motionmesh.io/v1/videos/vid_abc/hls/master.m3u8"
-  poster="https://api.motionmesh.io/v1/buckets/default/objects/videos/vid_abc/poster.jpg"
+  src="https://api.motionmesh.co.in/v1/videos/vid_abc/hls/master.m3u8"
+  poster="https://api.motionmesh.co.in/v1/buckets/default/objects/videos/vid_abc/poster.jpg"
   captions={[{
-    src: "https://api.motionmesh.io/v1/buckets/default/objects/videos/vid_abc/captions/en.vtt",
+    src: "https://api.motionmesh.co.in/v1/buckets/default/objects/videos/vid_abc/captions/en.vtt",
     label: "English",
     language: "en",
     default: true,

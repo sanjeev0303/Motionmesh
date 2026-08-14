@@ -76,3 +76,4 @@ terraform.rc
 
 # Load testing data
 tests/load/k6/data.json
+tests/load/k6/data.json

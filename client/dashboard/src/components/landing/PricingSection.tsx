@@ -80,7 +80,7 @@ export function PricingSection() {
                 disabled={loadingTier === tier.name}
                 onClick={async () => {
                   if (tier.name === "Scale") {
-                    window.location.href = "mailto:sales@motionmesh.com";
+                    window.location.href = "mailto:sales@motionmesh.co.in";
                     return;
                   }
                   

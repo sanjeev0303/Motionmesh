@@ -17,7 +17,7 @@ export default function VideoPage() {
   // Pass the signed playback URL obtained from the Motionmesh SDK
   return (
     <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-      <MotionmeshPlayer src="https://api.motionmesh.com/v1/videos/vid_123/hls/master.m3u8" />
+      <MotionmeshPlayer src="https://api.motionmesh.co.in/v1/videos/vid_123/hls/master.m3u8" />
     </div>
   );
 }
@@ -27,4 +27,4 @@ The player automatically handles resolution switching based on bandwidth, chapte
 
 ## Documentation
 
-For full configuration options and styling details, visit the [Motionmesh Documentation](https://motionmesh.com/docs) and the [main repository](https://github.com/sanjeev0303/motionmesh).
+For full configuration options and styling details, visit the [Motionmesh Documentation](https://motionmesh.co.in/docs) and the [main repository](https://github.com/sanjeev0303/motionmesh).

@@ -10,16 +10,16 @@ async function validateData() {
   }
 
   const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-  const { account_ids, api_keys, bucket_ids } = data;
+  const { account_ids, api_keys, bucket_ids, video_ids } = data;
 
   // Basic schema validation
-  if (!Array.isArray(account_ids) || !Array.isArray(api_keys) || !Array.isArray(bucket_ids)) {
-    console.error("Schema Error: account_ids, api_keys, or bucket_ids is missing or not an array");
+  if (!Array.isArray(account_ids) || !Array.isArray(api_keys) || !Array.isArray(bucket_ids) || !Array.isArray(video_ids)) {
+    console.error("Schema Error: account_ids, api_keys, bucket_ids, or video_ids is missing or not an array");
     process.exit(1);
   }
 
-  if (account_ids.length < 100000 || api_keys.length < 100000 || bucket_ids.length < 100000) {
-    console.error(`Schema Error: Minimum requirement is 100,000 records. Found ${account_ids.length} accounts, ${api_keys.length} keys, ${bucket_ids.length} buckets.`);
+  if (account_ids.length < 100000 || api_keys.length < 100000 || bucket_ids.length < 100000 || video_ids.length < 100000) {
+    console.error(`Schema Error: Minimum requirement is 100,000 records. Found ${account_ids.length} accounts, ${api_keys.length} keys, ${bucket_ids.length} buckets, ${video_ids.length} videos.`);
     process.exit(1);
   }
 
@@ -28,7 +28,7 @@ async function validateData() {
 
   // Check first few elements for performance
   for (let i = 0; i < 10; i++) {
-    if (!accountRegex.test(account_ids[i]) || !accountRegex.test(bucket_ids[i])) {
+    if (!accountRegex.test(account_ids[i]) || !accountRegex.test(bucket_ids[i]) || !accountRegex.test(video_ids[i])) {
       console.error(`Schema Error: Invalid UUID format at index ${i}`);
       process.exit(1);
     }
@@ -66,14 +66,29 @@ async function validateData() {
       const idx = Math.floor(Math.random() * account_ids.length);
       const accId = account_ids[idx];
       const apiKey = api_keys[idx];
+      const bucketId = bucket_ids[idx];
+      const videoId = video_ids[idx];
       const prefix = apiKey.split('.')[0];
       
       const { rows: checkRows } = await client.query('SELECT * FROM api_keys WHERE account_id = $1 AND prefix = $2', [accId, prefix]);
-      
       if (checkRows.length === 1) {
         console.log(`[OK] Account ${accId} has valid key matching prefix ${prefix}`);
       } else {
         console.error(`[ERROR] Account ${accId} missing or mismatch for prefix ${prefix}`);
+      }
+
+      const { rows: bucketRows } = await client.query('SELECT * FROM buckets WHERE id = $1 AND account_id = $2', [bucketId, accId]);
+      if (bucketRows.length === 1) {
+        console.log(`[OK] Account ${accId} has valid bucket ${bucketId}`);
+      } else {
+        console.error(`[ERROR] Account ${accId} missing or mismatch for bucket ${bucketId}`);
+      }
+
+      const { rows: videoRows } = await client.query('SELECT * FROM videos WHERE id = $1 AND account_id = $2 AND bucket_id = $3', [videoId, accId, bucketId]);
+      if (videoRows.length === 1) {
+        console.log(`[OK] Account ${accId} has valid video ${videoId} in bucket ${bucketId}`);
+      } else {
+        console.error(`[ERROR] Account ${accId} missing or mismatch for video ${videoId} in bucket ${bucketId}`);
       }
     }
     

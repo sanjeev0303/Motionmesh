@@ -74,9 +74,9 @@ export default function ProfileFeed({ params }: { params: { userId: string } }) 
         <div key={v.id} className="rounded-lg overflow-hidden border">
           {v.status === "ready" ? (
             <MotionMeshPlayer
-              src={`https://api.motionmesh.io/v1/videos/${v.id}/hls/master.m3u8`}
+              src={`https://api.motionmesh.co.in/v1/videos/${v.id}/hls/master.m3u8`}
               poster={v.thumbnail_key
-                ? `https://api.motionmesh.io/v1/buckets/default/objects/${v.thumbnail_key}`
+                ? `https://api.motionmesh.co.in/v1/buckets/default/objects/${v.thumbnail_key}`
                 : undefined}
             />
           ) : (
