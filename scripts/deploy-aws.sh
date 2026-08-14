@@ -56,12 +56,12 @@ if [ "$ENVIRONMENT" == "production" ]; then
     export BENCHMARK_MODE="false"
 fi
 export ALLOWED_ORIGINS="https://dashboard.motionmesh.com"
-export CLOUDFRONT_MEDIA_DOMAIN="media.motionmesh.com"
-export COOKIE_DOMAIN=".motionmesh.com"
+if ! CLOUDFRONT_MEDIA_DOMAIN=$(terraform output -raw media_domain_name); then fail "media_domain_name unavailable"; fi
+if ! COOKIE_DOMAIN=$(terraform output -raw cookie_domain); then fail "cookie_domain unavailable"; fi
 if ! API_DOMAIN=$(terraform output -raw api_domain_name); then fail "api_domain_name unavailable"; fi
 if ! ROUTE53_ZONE_ID=$(terraform output -raw route53_zone_id); then fail "route53_zone_id unavailable"; fi
 if ! DNS_DOMAIN=$(terraform output -raw dns_domain_name); then fail "dns_domain_name unavailable"; fi
-export API_DOMAIN ROUTE53_ZONE_ID DNS_DOMAIN
+export API_DOMAIN ROUTE53_ZONE_ID DNS_DOMAIN CLOUDFRONT_MEDIA_DOMAIN COOKIE_DOMAIN
 
 export GIT_SHA=$(git rev-parse --short HEAD)
 

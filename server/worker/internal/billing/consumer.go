@@ -10,6 +10,7 @@ import (
 	"time"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/nats-io/nats.go"
 	"github.com/stripe/stripe-go/v82"
@@ -161,7 +162,7 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 			defer wg.Done()
 			defer func() { <-sem }()
 			
-			if os.Getenv("STRIPE_MOCK_MODE") == "true" {
+			if os.Getenv("STRIPE_MODE") == "mock" {
 				mu.Lock()
 				publishedEvents = append(publishedEvents, e)
 				mu.Unlock()
@@ -177,6 +178,7 @@ func (c *Consumer) processStripeOutbox(ctx context.Context, batchSize, maxAttemp
 			}
 			params.IdempotencyKey = stripe.String(e.IdempotencyKey)
 			
+			metrics.StripeAPICallsTotal.Inc()
 			_, apiErr := meterevent.New(params)
 			
 			if apiErr != nil {

@@ -4,33 +4,53 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	lastUsedDebounce = 30 * time.Second
-	lastUsedHashKey  = "mot:api_key:last_used_buffer"
+	lastUsedDebounce  = 30 * time.Second
+	lastUsedHashKey   = "mot:api_key:last_used_buffer"
+	lastUsedQueueSize = 10000
 )
 
-// trackLastUsed fires a background goroutine that records the current time in a
-// Redis buffer hash for the given keyID, gated by a per-key lock so we write
-// at most once per debounce window. The goroutine is intentionally detached from
-// the request context so it doesn't cancel mid-flight.
+var (
+	lastUsedQueue = make(chan string, lastUsedQueueSize)
+	workerOnce    sync.Once
+)
+
+func startLastUsedWorker(rdb *redis.Client) {
+	workerOnce.Do(func() {
+		go func() {
+			ctx := context.Background()
+			for keyID := range lastUsedQueue {
+				start := time.Now()
+				lockKey := fmt.Sprintf("mot:api_key:last_used_lock:%s", keyID)
+				ok, err := rdb.SetNX(ctx, lockKey, "1", lastUsedDebounce).Result()
+				if err == nil && ok {
+					rdb.HSet(ctx, lastUsedHashKey, keyID, time.Now().Unix())
+				}
+				metrics.LastUsedWorkerLatency.Observe(time.Since(start).Seconds())
+			}
+		}()
+	})
+}
+
+// trackLastUsed attempts to enqueue the keyID for last-used tracking.
+// It relies on a bounded buffered queue to prevent goroutine exhaustion
+// on the hot path.
 func trackLastUsed(rdb *redis.Client, keyID string) {
-	go func() {
-		ctx := context.Background()
-		lockKey := fmt.Sprintf("mot:api_key:last_used_lock:%s", keyID)
-		ok, err := rdb.SetNX(ctx, lockKey, "1", lastUsedDebounce).Result()
-		if err != nil || !ok {
-			// Already tracked within this window, or Redis is temporarily down.
-			// Neither case warrants a log entry — this is the hot auth path.
-			return
-		}
-		rdb.HSet(ctx, lastUsedHashKey, keyID, time.Now().Unix())
-	}()
+	startLastUsedWorker(rdb)
+	select {
+	case lastUsedQueue <- keyID:
+		metrics.LastUsedEnqueueTotal.Inc()
+	default:
+		metrics.LastUsedDroppedTotal.Inc()
+	}
 }
 
 // FlushLastUsedLoop is started once from main.go.

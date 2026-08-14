@@ -18,6 +18,7 @@ import (
 	"github.com/clerk/clerk-sdk-go/v2/jwt"
 	"github.com/motionmesh/server/api/internal/auth/cache"
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/singleflight"
@@ -75,11 +76,13 @@ func NewService(repo AccountRepository, rdb *redis.Client, secretKey, _ string, 
 func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.Account, error) {
 	keySet, err := s.getJWKS(ctx)
 	if err != nil {
+		metrics.AuthFailure.Inc()
 		return nil, ErrInvalidToken
 	}
 
 	decoded, err := jwt.Decode(ctx, &jwt.DecodeParams{Token: token})
 	if err != nil {
+		metrics.AuthFailure.Inc()
 		return nil, ErrInvalidToken
 	}
 
@@ -95,6 +98,7 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 		s.invalidateJWKS()
 		keySet, err = s.getJWKS(ctx)
 		if err != nil {
+			metrics.AuthFailure.Inc()
 			return nil, ErrInvalidToken
 		}
 		for _, k := range keySet.Keys {
@@ -111,6 +115,7 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 		JWKSClient: s.jwksClient,
 	})
 	if err != nil {
+		metrics.AuthFailure.Inc()
 		return nil, ErrInvalidToken
 	}
 
@@ -126,19 +131,23 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 
 	// Tier 1: local LRU
 	if acc, ok := s.local.Get(cacheKey, ""); ok {
+		metrics.AuthLocalHit.Inc()
 		return acc, nil
 	}
 
 	// Tier 2: Redis
 	if acc, invalid, found := s.checkRedis(ctx, cacheKey, ""); found {
 		if invalid {
+			metrics.AuthFailure.Inc()
 			return nil, ErrInvalidToken
 		}
+		metrics.AuthRedisHit.Inc()
 		s.local.Set(cacheKey, acc, "", localCacheTTL)
 		return acc, nil
 	}
 
 	// Tier 3: Postgres
+	metrics.AuthDBFallback.Inc()
 	accI, err, _ := s.sf.Do(cacheKey, func() (interface{}, error) {
 		if claims.ActiveOrganizationID != "" {
 			return s.repo.UpsertByClerkOrgID(ctx, claims.ActiveOrganizationID, "")
@@ -147,6 +156,7 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 	})
 	
 	if err != nil || accI == nil {
+		metrics.AuthFailure.Inc()
 		s.cacheNegative(ctx, cacheKey)
 		return nil, ErrInvalidToken
 	}
@@ -177,10 +187,12 @@ func (s *Service) VerifyClerkToken(ctx context.Context, token string) (*models.A
 func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Account, error) {
 	parts := strings.SplitN(rawKey, ".", 2)
 	if len(parts) != 2 {
+		metrics.AuthFailure.Inc()
 		return nil, ErrInvalidAPIKey
 	}
 	prefix := parts[0]
 	if !strings.HasPrefix(prefix, "mot_live_") && !strings.HasPrefix(prefix, "mot_test_") {
+		metrics.AuthFailure.Inc()
 		return nil, ErrInvalidAPIKey
 	}
 
@@ -191,6 +203,7 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 
 	// ── Tier 1: local LRU ────────────────────────────────────────────────────
 	if account, ok := s.local.Get(cKey, digest); ok {
+		metrics.AuthLocalHit.Inc()
 		trackLastUsed(s.rdb, prefix)
 		return account, nil
 	}
@@ -198,14 +211,17 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 	// ── Tier 2: Redis ─────────────────────────────────────────────────────────
 	if account, invalid, found := s.checkRedis(ctx, cKey, digest); found {
 		if invalid {
+			metrics.AuthFailure.Inc()
 			return nil, ErrInvalidAPIKey
 		}
+		metrics.AuthRedisHit.Inc()
 		s.local.Set(cKey, account, digest, localCacheTTL)
 		trackLastUsed(s.rdb, prefix)
 		return account, nil
 	}
 
 	// ── Tier 3: Postgres ──────────────────────────────────────────────────────
+	metrics.AuthDBFallback.Inc()
 	type apiResult struct {
 		account *models.Account
 		hash    string
@@ -215,6 +231,7 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 		return apiResult{acc, storedHash}, err
 	})
 	if err != nil || resI == nil {
+		metrics.AuthFailure.Inc()
 		s.cacheNegative(ctx, cKey)
 		return nil, ErrInvalidAPIKey
 	}
@@ -224,12 +241,14 @@ func (s *Service) VerifyAPIKey(ctx context.Context, rawKey string) (*models.Acco
 	storedHash := res.hash
 	
 	if account == nil {
+		metrics.AuthFailure.Inc()
 		s.cacheNegative(ctx, cKey)
 		return nil, ErrInvalidAPIKey
 	}
 
 	// Constant-time comparison to prevent timing attacks.
 	if subtle.ConstantTimeCompare([]byte(digest), []byte(storedHash)) != 1 {
+		metrics.AuthFailure.Inc()
 		s.cacheNegative(ctx, cKey)
 		return nil, ErrInvalidAPIKey
 	}

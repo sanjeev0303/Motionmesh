@@ -27,6 +27,8 @@ if ! ZONE_ID=$(terraform output -raw route53_zone_id 2>/dev/null); then fail "Te
 if ! WAF_EXPECTED=$(terraform output -raw web_acl_arn 2>/dev/null); then fail "Terraform web_acl_arn output unavailable"; exit 1; fi
 if ! ACM_EXPECTED=$(terraform output -raw acm_certificate_arn 2>/dev/null); then fail "Terraform acm_certificate_arn output unavailable"; exit 1; fi
 if ! CF_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null); then fail "Terraform cloudfront_domain_name output unavailable"; exit 1; fi
+if ! MEDIA_DOMAIN=$(terraform output -raw media_domain_name 2>/dev/null); then fail "Terraform media_domain_name output unavailable"; exit 1; fi
+if ! COOKIE_DOMAIN=$(terraform output -raw cookie_domain 2>/dev/null); then fail "Terraform cookie_domain output unavailable"; exit 1; fi
 
 cd ../../../../
 

@@ -12,8 +12,13 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/models"
 )
+
+type Provider interface {
+	Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResponse, error)
+}
 
 type Client struct {
 	baseURL    string
@@ -49,6 +54,8 @@ type TranscribeResponse struct {
 }
 
 func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResponse, error) {
+	metrics.AIRequestsTotal.Inc()
+	
 	file, err := os.Open(req.AudioPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open audio file: %w", err)
@@ -106,4 +113,34 @@ func (c *Client) Transcribe(ctx context.Context, req TranscribeRequest) (*Transc
 	}
 
 	return &res, nil
+}
+
+type MockProvider struct{}
+
+func NewMockProvider() *MockProvider {
+	return &MockProvider{}
+}
+
+func (m *MockProvider) Transcribe(ctx context.Context, req TranscribeRequest) (*TranscribeResponse, error) {
+	metrics.AIRequestsTotal.Inc()
+	
+	// Simulate AI processing time
+	time.Sleep(500 * time.Millisecond)
+	
+	// Return mock response
+	res := &TranscribeResponse{
+		TranscriptText: "This is a mock transcript.",
+		VTT:            "WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\nThis is a mock transcript.",
+		Segments: []Segment{
+			{Start: 0, End: 5, Text: "This is a mock transcript."},
+		},
+	}
+	
+	if req.IncludeChapters {
+		res.Chapters = []models.Chapter{
+			{StartTimeSeconds: 0, Title: "Introduction"},
+		}
+	}
+	
+	return res, nil
 }

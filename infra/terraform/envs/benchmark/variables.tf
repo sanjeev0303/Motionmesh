@@ -90,3 +90,13 @@ variable "allowed_cors_origins" {
   default     = ["*"]
 }
 
+
+variable "cookie_domain" {
+  description = "The domain for cookies (e.g., .motionmesh.com)"
+  type        = string
+
+  validation {
+    condition     = length(var.cookie_domain) > 0
+    error_message = "cookie_domain must not be empty."
+  }
+}

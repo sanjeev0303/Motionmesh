@@ -108,3 +108,11 @@ output "diagnostic_repository_url" {
 output "dns_domain_name" {
   value = var.dns_domain_name
 }
+
+output "media_domain_name" {
+  value = var.media_domain_name
+}
+
+output "cookie_domain" {
+  value = var.cookie_domain
+}

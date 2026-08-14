@@ -21,6 +21,7 @@
 1. **API Throughput:** Sustained RPS on core endpoints.
 2. **Video Upload & Transcode:** Concurrent file uploads and FFmpeg worker processing capabilities.
 3. **Stream Delivery:** Concurrent HLS/CMAF playback via CloudFront.
+4. **Extreme High-Load (1M RPM):** Sustained 1 Million Requests Per Minute using mixed traffic and Node.js SDK scripts.
 
 ## 4. Performance Metrics
 
@@ -29,6 +30,9 @@
 |---|---|---|---|
 | Latency (p95) | < 50ms | [Value] | |
 | Max RPS | > 5000 | [Value] | |
+| Sustained 1M RPM Error Rate | < 0.1% | [Value] | Tested using `api-1m-rpm-sustained.js` |
+| Sustained 1M RPM Latency (p95) | < 100ms | [Value] | Tested using `api-1m-rpm-sustained.js` |
+| SDK 1M RPM Processing | > 16k RPS | [Value] | Tested using `sdk-1m-rpm.js` |
 | Error Rate | < 0.1% | [Value] | |
 
 ### 4.2 Worker Fleet & Transcoding (Go + FFmpeg)

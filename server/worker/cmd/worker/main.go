@@ -118,7 +118,12 @@ func main() {
 	billingConsumer := billing.NewConsumer(billingRepo, cfg.StripeSecretKey, log)
 	
 	up := uploader.NewUploader(storageAdapter)
-	capClient := captions.NewClient(cfg.CaptionsSidecarURL, &http.Client{Timeout: 30 * time.Minute})
+	var capClient captions.Provider
+	if cfg.AIMode == "mock" {
+		capClient = captions.NewMockProvider()
+	} else {
+		capClient = captions.NewClient(cfg.CaptionsSidecarURL, &http.Client{Timeout: 30 * time.Minute})
+	}
 	
 	jobHandler := job.NewHandler(db, storageAdapter, up, capClient, brandingRepo, log, nc)
 	

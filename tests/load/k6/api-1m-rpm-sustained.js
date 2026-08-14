@@ -10,7 +10,7 @@ export const options = {
       executor: 'constant-arrival-rate',
       rate: RPS_TARGET, // Target RPM / 60
       timeUnit: '1s',
-      duration: '30m',
+      duration: '10m',
       preAllocatedVUs: Math.max(2000, Math.min(RPS_TARGET, 10000)),
       maxVUs: Math.max(10000, RPS_TARGET * 2),
     },

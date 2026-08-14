@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/motionmesh/server/shared/logger"
+	"github.com/motionmesh/server/shared/metrics"
 	"github.com/motionmesh/server/shared/models"
 	"github.com/redis/go-redis/v9"
 	"github.com/stripe/stripe-go/v82"
@@ -63,7 +64,7 @@ func (s *Service) ReportUsage(ctx context.Context, eventID, accountID, eventType
 	// Make Stripe API calls asynchronous so they don't block the hot path
 	go func() {
 		// Respect mock mode for load testing
-		if os.Getenv("STRIPE_MOCK_MODE") == "true" {
+		if os.Getenv("STRIPE_MODE") == "mock" {
 			return
 		}
 
@@ -75,6 +76,8 @@ func (s *Service) ReportUsage(ctx context.Context, eventID, accountID, eventType
 				"value":              fmt.Sprintf("%d", qty),
 			},
 		}
+		
+		metrics.StripeAPICallsTotal.Inc()
 		_, err := meterevent.New(params)
 		if err != nil {
 			s.log.Error("failed to report stripe meter event for %s: %v", accountID, err)
