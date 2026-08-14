@@ -96,7 +96,29 @@ func main() {
 			log.Error("NATS is not connected")
 			hasErrors = true
 		} else {
-			log.Info("✅ NATS check passed")
+			log.Info("Running NATS Pub/Sub test")
+			sub, err := nc.SubscribeSync("diagnostic.test")
+			if err != nil {
+				log.Error("NATS subscribe error: %v", err)
+				hasErrors = true
+			} else {
+				err = nc.Publish("diagnostic.test", []byte("test_message"))
+				if err != nil {
+					log.Error("NATS publish error: %v", err)
+					hasErrors = true
+				} else {
+					msg, err := sub.NextMsg(2 * time.Second)
+					if err != nil {
+						log.Error("NATS receive error: %v", err)
+						hasErrors = true
+					} else if string(msg.Data) != "test_message" {
+						log.Error("NATS received wrong message: %s", string(msg.Data))
+						hasErrors = true
+					} else {
+						log.Info("✅ NATS check passed (Pub/Sub verified)")
+					}
+				}
+			}
 		}
 	}
 

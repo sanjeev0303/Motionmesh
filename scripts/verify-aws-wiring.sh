@@ -6,7 +6,7 @@ FAILURES=0
 
 function fail {
     echo "❌ $1"
-    ((FAILURES++))
+    FAILURES=$((FAILURES + 1))
 }
 
 function pass {
@@ -18,13 +18,33 @@ ENVIRONMENT=${1:-benchmark}
 echo "=== Verifying AWS Infrastructure Wiring for $ENVIRONMENT ==="
 
 cd infra/terraform/envs/$ENVIRONMENT
-AWS_REGION=$(terraform output -raw region)
 
-echo "[1/7] Checking ECR Repositories..."
+if ! AWS_REGION=$(terraform output -raw region); then fail "Terraform region output unavailable"; exit 1; fi
+if ! BUCKET_ID=$(terraform output -raw bucket_id); then fail "Terraform bucket_id output unavailable"; exit 1; fi
+if ! DIAG_REPO=$(terraform output -raw diagnostic_repository_url); then fail "Terraform diagnostic_repository_url unavailable"; exit 1; fi
+if ! API_DOMAIN=$(terraform output -raw api_domain_name 2>/dev/null); then fail "Terraform api_domain_name output unavailable"; exit 1; fi
+if ! ZONE_ID=$(terraform output -raw route53_zone_id 2>/dev/null); then fail "Terraform route53_zone_id output unavailable"; exit 1; fi
+if ! WAF_EXPECTED=$(terraform output -raw web_acl_arn 2>/dev/null); then fail "Terraform web_acl_arn output unavailable"; exit 1; fi
+if ! ACM_EXPECTED=$(terraform output -raw acm_certificate_arn 2>/dev/null); then fail "Terraform acm_certificate_arn output unavailable"; exit 1; fi
+if ! CF_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null); then fail "Terraform cloudfront_domain_name output unavailable"; exit 1; fi
+
+cd ../../../../
+
+echo "[1/8] Checking ECR Repositories..."
 aws ecr describe-repositories --repository-names motionmesh-api --region $AWS_REGION >/dev/null 2>&1 && pass "API Repo exists" || fail "API Repo missing"
 aws ecr describe-repositories --repository-names motionmesh-worker --region $AWS_REGION >/dev/null 2>&1 && pass "Worker Repo exists" || fail "Worker Repo missing"
 
-echo "[2/7] Checking Secrets Manager..."
+GIT_SHA=$(git rev-parse --short HEAD)
+echo "[2/8] Checking Diagnostic Image Pinned Tag..."
+DIAG_REPO_NAME=$(echo $DIAG_REPO | awk -F'/' '{print $2}')
+if aws ecr describe-images --repository-name "$DIAG_REPO_NAME" --image-ids imageTag=diagnostic-$GIT_SHA --region $AWS_REGION >/dev/null 2>&1; then
+    pass "Diagnostic Image diagnostic-$GIT_SHA exists in ECR"
+else
+    fail "Diagnostic Image diagnostic-$GIT_SHA missing in ECR!"
+    exit 1
+fi
+
+echo "[3/8] Checking Secrets Manager..."
 SECRETS="redis cloudfront-signing"
 if [ "$ENVIRONMENT" == "production" ]; then
     SECRETS="redis cloudfront-signing clerk stripe"
@@ -34,15 +54,16 @@ for secret in $SECRETS; do
     aws secretsmanager describe-secret --secret-id motionmesh/$ENVIRONMENT/$secret --region $AWS_REGION >/dev/null 2>&1 && pass "Secret motionmesh/$ENVIRONMENT/$secret exists" || fail "Secret motionmesh/$ENVIRONMENT/$secret missing"
 done
 
+cd infra/terraform/envs/$ENVIRONMENT
 DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn)
+cd ../../../../
 if [[ -n "$DB_SECRET_ARN" && "$DB_SECRET_ARN" != "None" ]]; then
     aws secretsmanager describe-secret --secret-id "$DB_SECRET_ARN" --region $AWS_REGION >/dev/null 2>&1 && pass "RDS managed secret exists: $DB_SECRET_ARN" || fail "RDS managed secret missing"
 else
     fail "RDS managed secret missing in terraform output"
 fi
 
-echo "[3/7] Checking S3 Bucket Security..."
-BUCKET_ID=$(terraform output -raw bucket_id)
+echo "[4/8] Checking S3 Bucket Security & CloudFront OAC..."
 PUBLIC_ACCESS=$(aws s3api get-public-access-block --bucket $BUCKET_ID --region $AWS_REGION --query 'PublicAccessBlockConfiguration' 2>/dev/null || echo "")
 if [[ "$PUBLIC_ACCESS" == *'"BlockPublicAcls": true'* ]] && [[ "$PUBLIC_ACCESS" == *'"BlockPublicPolicy": true'* ]]; then
     pass "S3 Block Public Access is fully enabled"
@@ -57,38 +78,58 @@ else
     fail "S3 CORS configuration is missing"
 fi
 
-cd ../../../../
+# Verify OAC Bucket Policy (P0-2)
+DIST_ID=$(aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='$CF_DOMAIN'].Id" --output text 2>/dev/null || echo "")
+if [[ -n "$DIST_ID" && "$DIST_ID" != "None" ]]; then
+    AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+    EXPECTED_ARN="arn:aws:cloudfront::${AWS_ACCOUNT_ID}:distribution/${DIST_ID}"
+    BUCKET_POLICY=$(aws s3api get-bucket-policy --bucket $BUCKET_ID --query 'Policy' --output text 2>/dev/null || echo "")
+    if [[ "$BUCKET_POLICY" == *"$EXPECTED_ARN"* ]]; then
+        pass "S3 Bucket Policy matches CloudFront Distribution ARN"
+    else
+        fail "S3 Bucket Policy DOES NOT match expected CloudFront ARN: $EXPECTED_ARN"
+    fi
+else
+    fail "CloudFront Distribution ID not found for $CF_DOMAIN"
+fi
 
-echo "[4/7] Checking Kubernetes External Secrets..."
+# P0-1: S3 CloudFront OAC End-to-End Test
+echo "-> Uploading test file for OAC End-to-End verification..."
+TEST_CONTENT="OAC Verification $GIT_SHA"
+echo "$TEST_CONTENT" > /tmp/oac-test.txt
+aws s3 cp /tmp/oac-test.txt s3://$BUCKET_ID/$ENVIRONMENT/oac-test/$GIT_SHA.txt --region $AWS_REGION >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+    pass "Test file uploaded to S3"
+    
+    # Direct S3 GET MUST = 403 (or 400 depending on exact url format, but blocked)
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$BUCKET_ID.s3.$AWS_REGION.amazonaws.com/$ENVIRONMENT/oac-test/$GIT_SHA.txt")
+    if [ "$HTTP_CODE" == "403" ]; then
+        pass "Direct anonymous S3 GET blocked (403)"
+    else
+        fail "Direct anonymous S3 GET returned $HTTP_CODE (Expected 403)"
+    fi
+    
+    # CloudFront GET MUST = 200
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$CF_DOMAIN/$ENVIRONMENT/oac-test/$GIT_SHA.txt")
+    if [ "$HTTP_CODE" == "200" ]; then
+        pass "CloudFront GET succeeded via OAC (200)"
+    else
+        fail "CloudFront GET failed via OAC. Returned $HTTP_CODE (Expected 200)"
+    fi
+else
+    fail "Failed to upload test file to S3"
+fi
+
+
+echo "[5/8] Checking Kubernetes External Secrets..."
 kubectl get secretstore aws-secretsmanager -n motionmesh >/dev/null 2>&1 && pass "SecretStore exists" || fail "SecretStore missing"
 kubectl get externalsecret motionmesh-secrets -n motionmesh -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep "True" >/dev/null && pass "ExternalSecret motionmesh-secrets is Synced" || fail "ExternalSecret motionmesh-secrets is NOT Synced"
 kubectl get secret motionmesh-secrets -n motionmesh >/dev/null 2>&1 && pass "K8s Secret motionmesh-secrets was successfully created" || fail "K8s Secret motionmesh-secrets missing"
 
-echo "[5/7] Checking Application SDK Identity Access..."
+echo "[6/8] Checking Application SDK Identity Access..."
 ./scripts/test-pod-identity.sh $ENVIRONMENT || fail "Pod Identity Tests Failed"
 
-echo "[6/7] Checking Active Connections (DB, Redis, NATS) via Infrastructure Tools..."
-GIT_SHA=$(git rev-parse --short HEAD)
-# Get API image URL and extract base repo up to the tag
-DIAG_REPO=$(terraform output -raw diagnostic_repository_url)
-# The diagnostic image is pushed to motionmesh-diagnostic:$GIT_SHA locally or to ECR
-# Wait, deploy-aws.sh tags it locally as motionmesh-diagnostic:$GIT_SHA, but doesn't push it to an ECR repo for diagnostic!
-# I need to use it. If it's not pushed, the cluster can't pull it unless it's pushed.
-# Wait! In deploy-aws.sh, it just tags it locally: 
-# docker build -t motionmesh-diagnostic -f infra/docker/diagnostic/Dockerfile .
-# docker tag motionmesh-diagnostic motionmesh-diagnostic:$GIT_SHA
-# The cluster won't find it if it's not pushed.
-# Actually, wait, let me look at deploy-aws.sh again.
-# Wait, instead of fixing that here, let's just use the motionmesh-api:$GIT_SHA image! Because the API image has the /app/diagnostic tool built in!
-# Wait, verify-aws-wiring.sh says "Use motionmesh-diagnostic:$GIT_SHA for infrastructure-level verifications instead of alpine with apk add."
-# So I should change deploy-aws.sh to push the diagnostic image to ECR? Wait, there is no ECR repo for diagnostic.
-# Or maybe the local image is available to Minikube/kind? But this is EKS on AWS, so it needs to be in ECR!
-# Let me use public alpine image for the base if it wasn't pushed? No, the plan strictly said:
-# "Use motionmesh-diagnostic:$GIT_SHA for infrastructure-level verifications instead of alpine with apk add."
-# Let's assume the user has a way to get it, or I should just use `motionmesh-diagnostic:$GIT_SHA` as the plan requested.
-# But wait, it will fail ImagePull. I'll just change the script as requested.
-# I'll use `motionmesh-diagnostic:$GIT_SHA`.
-
+echo "[7/8] Checking Active Connections (DB, Redis, NATS) via Infrastructure Tools..."
 kubectl delete pod diag-infra-test -n motionmesh --ignore-not-found 2>/dev/null
 
 kubectl run diag-infra-test --image=$DIAG_REPO:diagnostic-$GIT_SHA -n motionmesh \
@@ -104,17 +145,12 @@ echo "-> Testing Redis connection using injected REDIS_URL..."
 kubectl exec diag-infra-test -n motionmesh -- sh -c 'redis-cli -u $REDIS_URL PING' | grep PONG >/dev/null 2>&1 && pass "Redis Connected" || fail "Redis Connection Failed"
 
 echo "-> Testing NATS Connection..."
-# The diagnostic image has bind-tools/curl, maybe use something else to test NATS? The previous script used natsio/nats-box.
-# But I can use the /app/diagnostic Go binary that's built inside the API image, or just test TCP connection using nc.
-# Wait, the alpine image with bind-tools has `nc`.
 kubectl exec diag-infra-test -n motionmesh -- sh -c 'nc -z nats.motionmesh.svc.cluster.local 4222' >/dev/null 2>&1 && pass "NATS Server Connected" || fail "NATS Connection Failed"
 
 # Cleanup
 kubectl delete pod diag-infra-test -n motionmesh --ignore-not-found 2>/dev/null || true
 
-echo "[7/7] Checking Routing, ALB, WAF, ACM, and CDN..."
-cd infra/terraform/envs/$ENVIRONMENT
-
+echo "[8/8] Checking Routing, ALB, WAF, ACM, and CDN..."
 ALB_HOST=$(kubectl get ingress motionmesh-api-ingress -n motionmesh -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 if [[ -n "$ALB_HOST" ]]; then
     pass "ALB successfully provisioned by LBC: $ALB_HOST"
@@ -122,14 +158,12 @@ if [[ -n "$ALB_HOST" ]]; then
     ALB_ARN=$(aws elbv2 describe-load-balancers --region $AWS_REGION --query "LoadBalancers[?DNSName=='$ALB_HOST'].LoadBalancerArn" --output text 2>/dev/null || echo "")
     if [[ -n "$ALB_ARN" && "$ALB_ARN" != "None" ]]; then
         WAF_ASSOC=$(aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region $AWS_REGION --query 'WebACL.ARN' --output text 2>/dev/null || echo "")
-        WAF_EXPECTED=$(terraform output -raw web_acl_arn)
         if [[ "$WAF_ASSOC" == "$WAF_EXPECTED" ]]; then
             pass "ALB is protected by exact WAF ACL"
         else
             fail "ALB WAF ACL mismatch. Expected: $WAF_EXPECTED, Got: $WAF_ASSOC"
         fi
 
-        ACM_EXPECTED=$(terraform output -raw acm_certificate_arn 2>/dev/null || echo "")
         if [[ -n "$ACM_EXPECTED" && "$ACM_EXPECTED" != "MISSING" && "$ACM_EXPECTED" != "None" ]]; then
             LISTENER_ARN=$(aws elbv2 describe-listeners --load-balancer-arn $ALB_ARN --region $AWS_REGION --query 'Listeners[?Protocol==`HTTPS`].ListenerArn' --output text 2>/dev/null || echo "")
             if [[ -n "$LISTENER_ARN" && "$LISTENER_ARN" != "None" ]]; then
@@ -152,18 +186,36 @@ else
     fail "ALB not provisioned yet (check aws-load-balancer-controller logs)"
 fi
 
-API_DOMAIN=$(terraform output -raw api_domain_name 2>/dev/null || echo "")
-ZONE_ID=$(terraform output -raw route53_zone_id 2>/dev/null || echo "")
 if [[ -n "$API_DOMAIN" && "$API_DOMAIN" != "None" && -n "$ZONE_ID" && "$ZONE_ID" != "None" ]]; then
     RECORD=$(aws route53 list-resource-record-sets --hosted-zone-id $ZONE_ID --query "ResourceRecordSets[?Name=='$API_DOMAIN.'].Name" --output text 2>/dev/null || echo "")
     if [[ "$RECORD" == "$API_DOMAIN." ]]; then
         pass "DNS record for $API_DOMAIN exists in Route53"
+        # P0-13: API DNS dig and curl
+        echo "-> Verifying API DNS resolution and health..."
+        if dig +short $API_DOMAIN | grep -q 'amazonaws.com'; then
+            pass "dig $API_DOMAIN resolved to CNAME"
+        else
+            fail "dig $API_DOMAIN failed to resolve to expected CNAME"
+        fi
+        
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_DOMAIN/health")
+        if [ "$HTTP_CODE" == "200" ]; then
+            pass "curl https://$API_DOMAIN/health returned 200"
+        else
+            fail "curl https://$API_DOMAIN/health returned $HTTP_CODE"
+        fi
+        
+        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$API_DOMAIN/ready")
+        if [ "$HTTP_CODE" == "200" ]; then
+            pass "curl https://$API_DOMAIN/ready returned 200"
+        else
+            fail "curl https://$API_DOMAIN/ready returned $HTTP_CODE"
+        fi
     else
         fail "DNS record for $API_DOMAIN missing in Route53"
     fi
 fi
 
-CF_DOMAIN=$(terraform output -raw cloudfront_domain_name 2>/dev/null || echo "")
 if [[ -n "$CF_DOMAIN" && "$CF_DOMAIN" != "None" ]]; then
     STATUS=$(aws cloudfront list-distributions --query "DistributionList.Items[?DomainName=='$CF_DOMAIN'].Status" --output text 2>/dev/null || echo "")
     if [[ "$STATUS" == "Deployed" || "$STATUS" == "InProgress" ]]; then
@@ -172,8 +224,6 @@ if [[ -n "$CF_DOMAIN" && "$CF_DOMAIN" != "None" ]]; then
         fail "CloudFront distribution missing or unknown status: $STATUS"
     fi
 fi
-
-cd ../../../../
 
 echo "======================================"
 if [ $FAILURES -gt 0 ]; then

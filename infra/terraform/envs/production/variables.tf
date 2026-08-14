@@ -37,7 +37,7 @@ variable "aurora_instance_class" {
 variable "media_domain_name" {
   description = "The custom media domain name (e.g., media.motionmesh.com)"
   type        = string
-  
+
   validation {
     condition     = length(var.media_domain_name) > 0
     error_message = "media_domain_name must not be empty."
@@ -47,7 +47,7 @@ variable "media_domain_name" {
 variable "acm_certificate_arn" {
   description = "The ARN of the ACM certificate to use for the custom domain"
   type        = string
-  
+
   validation {
     condition     = startswith(var.acm_certificate_arn, "arn:aws:acm:")
     error_message = "acm_certificate_arn must start with 'arn:aws:acm:'."
@@ -57,7 +57,7 @@ variable "acm_certificate_arn" {
 variable "route53_zone_id" {
   description = "Route53 Hosted Zone ID for alias records"
   type        = string
-  
+
   validation {
     condition     = startswith(var.route53_zone_id, "Z")
     error_message = "route53_zone_id must start with 'Z'."
@@ -67,7 +67,7 @@ variable "route53_zone_id" {
 variable "api_domain_name" {
   description = "The custom API domain name (e.g., api.motionmesh.com)"
   type        = string
-  
+
   validation {
     condition     = length(var.api_domain_name) > 0
     error_message = "api_domain_name must not be empty."
@@ -77,4 +77,20 @@ variable "api_domain_name" {
 variable "cloudfront_signing_public_key" {
   description = "PEM encoded RSA public key for CloudFront signed cookies"
   type        = string
+}
+
+variable "dns_domain_name" {
+  description = "The base DNS domain name for ExternalDNS (e.g., motionmesh.com)"
+  type        = string
+
+  validation {
+    condition     = length(var.dns_domain_name) > 0
+    error_message = "dns_domain_name must not be empty."
+  }
+}
+
+variable "allowed_cors_origins" {
+  description = "List of allowed CORS origins"
+  type        = list(string)
+  default     = ["https://dashboard.motionmesh.com"]
 }

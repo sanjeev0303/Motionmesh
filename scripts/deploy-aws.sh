@@ -5,6 +5,12 @@ set -euo pipefail
 ENVIRONMENT=${1:-benchmark}
 echo "Deploying to AWS Environment: $ENVIRONMENT"
 
+function fail {
+    echo "❌ $1"
+    echo "DEPLOYMENT FAILED"
+    exit 1
+}
+
 cd infra/terraform/envs/$ENVIRONMENT
 
 echo "1. terraform init"
@@ -20,22 +26,25 @@ echo "2. terraform apply (Foundation)"
 terraform apply -auto-approve tfplan
 
 echo "3. get outputs"
-export S3_BUCKET_ID=$(terraform output -raw bucket_id)
-export S3_BUCKET_REGION=$(terraform output -raw bucket_region)
-export CLOUDFRONT_DISTRIBUTION_DOMAIN=$(terraform output -raw cloudfront_domain_name)
-export API_IMAGE_URI=$(terraform output -raw api_repository_url)
-export WORKER_IMAGE_URI=$(terraform output -raw worker_repository_url)
-export DIAGNOSTIC_IMAGE_URI=$(terraform output -raw diagnostic_repository_url)
-export AWS_REGION=$(terraform output -raw region)
-export WAF_ACL_ARN=$(terraform output -raw web_acl_arn)
-export ACM_CERTIFICATE_ARN=$(terraform output -raw acm_certificate_arn 2>/dev/null || echo "MISSING")
-export EKS_CLUSTER_NAME=$(terraform output -raw cluster_name)
-export VPC_ID=$(terraform output -raw vpc_id)
-export DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn)
-export AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint)
-export ALB_SG_ID=$(terraform output -raw alb_security_group_id)
-export LBC_ROLE_ARN=$(terraform output -raw lbc_role_arn)
-export EXTERNAL_DNS_ROLE_ARN=$(terraform output -raw external_dns_role_arn)
+if ! S3_BUCKET_ID=$(terraform output -raw bucket_id); then fail "bucket_id unavailable"; fi
+if ! S3_BUCKET_REGION=$(terraform output -raw bucket_region); then fail "bucket_region unavailable"; fi
+if ! CLOUDFRONT_DISTRIBUTION_DOMAIN=$(terraform output -raw cloudfront_domain_name); then fail "cloudfront_domain_name unavailable"; fi
+if ! API_IMAGE_URI=$(terraform output -raw api_repository_url); then fail "api_repository_url unavailable"; fi
+if ! WORKER_IMAGE_URI=$(terraform output -raw worker_repository_url); then fail "worker_repository_url unavailable"; fi
+if ! DIAGNOSTIC_IMAGE_URI=$(terraform output -raw diagnostic_repository_url); then fail "diagnostic_repository_url unavailable"; fi
+if ! AWS_REGION=$(terraform output -raw region); then fail "region unavailable"; fi
+if ! WAF_ACL_ARN=$(terraform output -raw web_acl_arn); then fail "web_acl_arn unavailable"; fi
+ACM_CERTIFICATE_ARN=$(terraform output -raw acm_certificate_arn 2>/dev/null || echo "MISSING")
+if ! EKS_CLUSTER_NAME=$(terraform output -raw cluster_name); then fail "cluster_name unavailable"; fi
+if ! VPC_ID=$(terraform output -raw vpc_id); then fail "vpc_id unavailable"; fi
+if ! DB_SECRET_ARN=$(terraform output -raw aurora_master_secret_arn); then fail "aurora_master_secret_arn unavailable"; fi
+if ! AURORA_ENDPOINT=$(terraform output -raw aurora_endpoint); then fail "aurora_endpoint unavailable"; fi
+if ! ALB_SG_ID=$(terraform output -raw alb_security_group_id); then fail "alb_security_group_id unavailable"; fi
+if ! LBC_ROLE_ARN=$(terraform output -raw lbc_role_arn); then fail "lbc_role_arn unavailable"; fi
+if ! EXTERNAL_DNS_ROLE_ARN=$(terraform output -raw external_dns_role_arn); then fail "external_dns_role_arn unavailable"; fi
+
+export S3_BUCKET_ID S3_BUCKET_REGION CLOUDFRONT_DISTRIBUTION_DOMAIN API_IMAGE_URI WORKER_IMAGE_URI DIAGNOSTIC_IMAGE_URI AWS_REGION WAF_ACL_ARN ACM_CERTIFICATE_ARN EKS_CLUSTER_NAME VPC_ID DB_SECRET_ARN AURORA_ENDPOINT ALB_SG_ID LBC_ROLE_ARN EXTERNAL_DNS_ROLE_ARN
+
 
 export ENVIRONMENT=$ENVIRONMENT
 export STRIPE_MODE="mock"
@@ -49,8 +58,10 @@ fi
 export ALLOWED_ORIGINS="https://dashboard.motionmesh.com"
 export CLOUDFRONT_MEDIA_DOMAIN="media.motionmesh.com"
 export COOKIE_DOMAIN=".motionmesh.com"
-export API_DOMAIN=$(terraform output -raw api_domain_name)
-export ROUTE53_ZONE_ID=$(terraform output -raw route53_zone_id)
+if ! API_DOMAIN=$(terraform output -raw api_domain_name); then fail "api_domain_name unavailable"; fi
+if ! ROUTE53_ZONE_ID=$(terraform output -raw route53_zone_id); then fail "route53_zone_id unavailable"; fi
+if ! DNS_DOMAIN=$(terraform output -raw dns_domain_name); then fail "dns_domain_name unavailable"; fi
+export API_DOMAIN ROUTE53_ZONE_ID DNS_DOMAIN
 
 export GIT_SHA=$(git rev-parse --short HEAD)
 
@@ -106,7 +117,7 @@ helm upgrade --install external-dns bitnami/external-dns \
   --set aws.region=$AWS_REGION \
   --set aws.zoneType=public \
   --set txtOwnerId=$EKS_CLUSTER_NAME \
-  --set domainFilters[0]=motionmesh.com \
+  --set domainFilters[0]=$DNS_DOMAIN \
   --set policy=upsert-only \
   --set serviceAccount.create=false \
   --set serviceAccount.name=external-dns \
@@ -181,9 +192,14 @@ kubectl rollout status deployment/api -n motionmesh --timeout=300s
 kubectl rollout status deployment/worker -n motionmesh --timeout=300s
 
 echo "20. run smoke test"
-./scripts/smoke-test-aws.sh $ENVIRONMENT
+if ! ./scripts/smoke-test-aws.sh $ENVIRONMENT; then
+    fail "Smoke test failed"
+fi
 
 echo "21. run AWS wiring verification"
-./scripts/verify-aws-wiring.sh $ENVIRONMENT
+if ! ./scripts/verify-aws-wiring.sh $ENVIRONMENT; then
+    fail "AWS Wiring Verification failed"
+fi
 
 echo "22. DEPLOYMENT READY"
+

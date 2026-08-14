@@ -457,6 +457,10 @@ Join the Motionmesh community:
 
 Security is a first-class citizen. We enforce strict Server-to-Server Proxy Patterns, utilize Signed URLs for all media access, and ensure secrets are never leaked to the client.
 
+### Internal Infrastructure Security (Benchmark Phase)
+> [!WARNING]
+> **Redis:** Currently operates within a private VPC without transit encryption (TLS) or explicit authentication for the benchmark phase. It is strictly isolated from public access and only reachable by internal worker and API nodes. This configuration is documented here for future security audits and will be hardened in future production releases.
+
 For responsible disclosure, please email `security@motionmesh.com` directly. Do not open public issues for security vulnerabilities.
 
 ---

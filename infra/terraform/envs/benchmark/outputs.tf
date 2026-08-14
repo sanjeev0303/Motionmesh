@@ -104,3 +104,7 @@ output "route53_zone_id" {
 output "diagnostic_repository_url" {
   value = module.ecr_diagnostic.repository_url
 }
+
+output "dns_domain_name" {
+  value = var.dns_domain_name
+}

@@ -45,9 +45,10 @@ module "elasticache" {
 }
 
 module "s3" {
-  source      = "../../modules/s3"
-  environment = var.environment
-  bucket_name = "motionmesh-assets-${var.environment}"
+  source               = "../../modules/s3"
+  environment          = var.environment
+  bucket_name          = "motionmesh-assets-${var.environment}"
+  allowed_cors_origins = var.allowed_cors_origins
 }
 
 module "cloudfront" {
