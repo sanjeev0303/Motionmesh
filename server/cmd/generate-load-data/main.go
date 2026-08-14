@@ -9,6 +9,10 @@ import (
 	"os"
 	"time"
 
+	cryptorand "crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +35,22 @@ type Bucket struct {
 	AccountID string
 	Name      string
 	CreatedAt time.Time
+}
+
+type APIKey struct {
+	ID        string
+	AccountID string
+	Name      string
+	Prefix    string
+	Hash      string
+	Scopes    []string
+	CreatedAt time.Time
+}
+
+type DataExport struct {
+	AccountIDs []string `json:"account_ids"`
+	APIKeys    []string `json:"api_keys"`
+	BucketIDs  []string `json:"bucket_ids"`
 }
 
 func main() {
@@ -71,9 +91,12 @@ func main() {
 
 	startTime := time.Now()
 
-	// 1. Generate Accounts & Buckets in chunks to avoid OOM
-	accountIDs := make([]string, 0, numAccounts)
-	bucketIDs := make([]string, 0, numAccounts)
+	// 1. Generate Accounts, API Keys & Buckets in chunks to avoid OOM
+	exportData := DataExport{
+		AccountIDs: make([]string, 0, numAccounts),
+		APIKeys:    make([]string, 0, numAccounts),
+		BucketIDs:  make([]string, 0, numAccounts),
+	}
 	
 	for i := 0; i < numAccounts; i += chunkSize {
 		end := i + chunkSize
@@ -84,14 +107,29 @@ func main() {
 		batchSize := end - i
 		accountRows := make([][]any, batchSize)
 		bucketRows := make([][]any, batchSize)
+		apiKeyRows := make([][]any, batchSize)
 		now := time.Now()
 		
 		for j := 0; j < batchSize; j++ {
 			accID := uuid.New().String()
 			bucketID := uuid.New().String()
 			
-			accountIDs = append(accountIDs, accID)
-			bucketIDs = append(bucketIDs, bucketID)
+			// Generate API Key
+			prefixBytes := make([]byte, 8)
+			secretBytes := make([]byte, 32)
+			cryptorand.Read(prefixBytes)
+			cryptorand.Read(secretBytes)
+			
+			prefix := "mot_live_" + hex.EncodeToString(prefixBytes)
+			secret := hex.EncodeToString(secretBytes)
+			rawKey := prefix + "." + secret
+			
+			hashBytes := sha256.Sum256([]byte(secret))
+			hash := hex.EncodeToString(hashBytes[:])
+			
+			exportData.AccountIDs = append(exportData.AccountIDs, accID)
+			exportData.BucketIDs = append(exportData.BucketIDs, bucketID)
+			exportData.APIKeys = append(exportData.APIKeys, rawKey)
 			
 			accountRows[j] = []any{
 				accID,
@@ -109,6 +147,16 @@ func main() {
 				bucketID,
 				accID,
 				fmt.Sprintf("loadtest-bucket-%s", accID[:8]),
+				now,
+			}
+			
+			apiKeyRows[j] = []any{
+				uuid.New().String(),
+				accID,
+				"Loadtest Key",
+				prefix,
+				hash,
+				[]string{"*"},
 				now,
 			}
 		}
@@ -131,6 +179,16 @@ func main() {
 		)
 		if err != nil {
 			log.Fatalf("failed to insert buckets chunk: %v", err)
+		}
+		
+		_, err = db.CopyFrom(
+			ctx,
+			pgx.Identifier{"api_keys"},
+			[]string{"id", "account_id", "name", "prefix", "hash", "scopes", "created_at"},
+			pgx.CopyFromRows(apiKeyRows),
+		)
+		if err != nil {
+			log.Fatalf("failed to insert api_keys chunk: %v", err)
 		}
 		
 		log.Printf("Inserted accounts %d to %d...", i, end)
@@ -162,8 +220,8 @@ func main() {
 					idx = numAccounts - 1
 				}
 				
-				accID := accountIDs[idx]
-				bktID := bucketIDs[idx]
+				accID := exportData.AccountIDs[idx]
+				bktID := exportData.BucketIDs[idx]
 				vidID := uuid.New().String()
 				
 				videoRows[j] = []any{
@@ -195,6 +253,19 @@ func main() {
 		log.Printf("Successfully inserted %d videos.", numVideos)
 	}
 
+	// 3. Write data.json
+	file, err := os.Create("tests/load/k6/data.json")
+	if err != nil {
+		log.Fatalf("failed to create data.json: %v", err)
+	}
+	defer file.Close()
+	
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(exportData); err != nil {
+		log.Fatalf("failed to encode data.json: %v", err)
+	}
+	
 	duration := time.Since(startTime)
 	log.Printf("Load data generation complete in %s.", duration)
 }

@@ -12,6 +12,32 @@ async function validateData() {
   const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
   const { account_ids, api_keys, bucket_ids } = data;
 
+  // Basic schema validation
+  if (!Array.isArray(account_ids) || !Array.isArray(api_keys) || !Array.isArray(bucket_ids)) {
+    console.error("Schema Error: account_ids, api_keys, or bucket_ids is missing or not an array");
+    process.exit(1);
+  }
+
+  if (account_ids.length < 100000 || api_keys.length < 100000 || bucket_ids.length < 100000) {
+    console.error(`Schema Error: Minimum requirement is 100,000 records. Found ${account_ids.length} accounts, ${api_keys.length} keys, ${bucket_ids.length} buckets.`);
+    process.exit(1);
+  }
+
+  const accountRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const apiKeyRegex = /^mot_live_[0-9a-f]{16}\.[0-9a-f]{64}$/;
+
+  // Check first few elements for performance
+  for (let i = 0; i < 10; i++) {
+    if (!accountRegex.test(account_ids[i]) || !accountRegex.test(bucket_ids[i])) {
+      console.error(`Schema Error: Invalid UUID format at index ${i}`);
+      process.exit(1);
+    }
+    if (!apiKeyRegex.test(api_keys[i])) {
+      console.error(`Schema Error: Invalid API Key format at index ${i}`);
+      process.exit(1);
+    }
+  }
+
   console.log(`Validating data.json with ${account_ids.length} accounts...`);
 
   const pool = new Pool({
