@@ -130,7 +130,7 @@ func main() {
 			cryptorand.Read(prefixBytes)
 			cryptorand.Read(secretBytes)
 			
-			prefix := "mot_live_" + hex.EncodeToString(prefixBytes)
+			prefix := "mot_test_" + hex.EncodeToString(prefixBytes)
 			secret := hex.EncodeToString(secretBytes)
 			rawKey := prefix + "." + secret
 			
@@ -258,6 +258,8 @@ func main() {
 				accID := exportData.AccountIDs[idx]
 				bktID := exportData.BucketIDs[idx]
 				vidID := uuid.New().String()
+				
+				exportData.VideoIDs = append(exportData.VideoIDs, vidID)
 				
 				videoRows[j] = []any{
 					vidID,

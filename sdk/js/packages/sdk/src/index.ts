@@ -1,4 +1,3 @@
-import { motionmesh } from "./client/index.js";
-import { handleProcessRequest } from "./services/processRequest.js";
-export { motionmesh, handleProcessRequest };
+import { motionmesh, MotionMeshClient } from "./client/index.js";
+export { motionmesh, MotionMeshClient };
 export type { UploadVideoFields, UploadVideoResult } from "./types/index.js";

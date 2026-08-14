@@ -45,7 +45,12 @@ if (!data.api_keys || data.api_keys.length === 0) {
   process.exit(1);
 }
 
-const BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
+let BASE_URL = process.env.BASE_URL || 'http://localhost:8080';
+if (process.env.AWS_MODE === 'true') {
+  BASE_URL = 'https://api.motionmesh.co.in/v1';
+}
+
+const CLIENT_TYPE = process.env.CLIENT_TYPE || 'sdk';
 const TIERS = (process.env.RPS_TIERS || '1000,5000,10000,16667,20000').split(',').map(Number);
 const DURATION_SEC = parseInt(process.env.DURATION_SEC || "30");
 const MAX_CONCURRENCY = parseInt(process.env.MAX_CONCURRENCY || "2000");
@@ -55,14 +60,17 @@ const client = new MotionMeshClient({
   baseURL: BASE_URL,
 });
 
+const httpHeaders = { 'Authorization': `Bearer ${data.api_keys[0]}` };
+
 async function runTier(targetRPS) {
   console.log(`\n==============================================`);
   console.log(`Starting SDK Benchmark Tier: ${targetRPS} RPS`);
   console.log(`==============================================`);
 
-  let completed = 0;
-  let errors = 0;
+  let successful = 0;
+  let failed = 0;
   let dropped = 0;
+  let sent = 0;
   let inFlight = 0;
   const latencies = new ReservoirSampler(1024);
   
@@ -86,17 +94,40 @@ async function runTier(targetRPS) {
       }
 
       inFlight++;
+      sent++;
       const reqStart = performance.now();
       
       try {
-        await client.videos.list({ limit: 10 });
-        completed++;
+        const op = Math.random();
+        
+        if (CLIENT_TYPE === 'sdk') {
+            let p;
+            if (op < 0.4) p = client.videos.list({ limit: 10 });
+            else if (op < 0.6) p = client.buckets.list();
+            else if (op < 0.8 && data.video_ids && data.video_ids.length > 0) p = client.videos.get(data.video_ids[Math.floor(Math.random() * data.video_ids.length)]);
+            else if (op < 0.9 && data.video_ids && data.video_ids.length > 0) p = client.videos.playback(data.video_ids[Math.floor(Math.random() * data.video_ids.length)]);
+            else p = client.mediaConverter.listJobs({ limit: 10 });
+            await p;
+        } else {
+            let url;
+            if (op < 0.4) url = `${BASE_URL}/videos?limit=10`;
+            else if (op < 0.6) url = `${BASE_URL}/buckets`;
+            else if (op < 0.8 && data.video_ids && data.video_ids.length > 0) url = `${BASE_URL}/videos/${data.video_ids[Math.floor(Math.random() * data.video_ids.length)]}`;
+            else if (op < 0.9 && data.video_ids && data.video_ids.length > 0) url = `${BASE_URL}/videos/${data.video_ids[Math.floor(Math.random() * data.video_ids.length)]}/playback`;
+            else url = `${BASE_URL}/jobs?limit=10`;
+            
+            const res = await fetch(url, { headers: httpHeaders });
+            if (!res.ok) throw new Error("HTTP error " + res.status);
+            if (res.status !== 204) await res.json();
+        }
+        
+        successful++;
         latencies.add(performance.now() - reqStart);
       } catch (err) {
-        errors++;
+        failed++;
       } finally {
         inFlight--;
-        if (completed + errors + dropped >= totalRequests) {
+        if (successful + failed + dropped >= totalRequests) {
           resolve();
         }
       }
@@ -107,24 +138,27 @@ async function runTier(targetRPS) {
   
   const end = performance.now();
   const totalTimeSec = (end - start) / 1000;
-  const actualRps = completed / totalTimeSec;
+  const actualRps = successful / totalTimeSec;
   
   const p50 = latencies.getPercentile(0.50);
   const p95 = latencies.getPercentile(0.95);
   const p99 = latencies.getPercentile(0.99);
 
+  console.log(`Client Type:    ${CLIENT_TYPE}`);
   console.log(`Requested RPS:  ${targetRPS}`);
   console.log(`Actual RPS:     ${actualRps.toFixed(2)}`);
-  console.log(`Total Requests: ${completed + errors + dropped}`);
-  console.log(`Successful:     ${completed}`);
-  console.log(`Failed:         ${errors}`);
+  console.log(`Total Requests: ${requestedCount}`);
+  console.log(`Sent:           ${sent}`);
+  console.log(`Completed:      ${successful + failed}`);
+  console.log(`Successful:     ${successful}`);
+  console.log(`Failed:         ${failed}`);
   console.log(`Dropped:        ${dropped}`);
   console.log(`Time Elapsed:   ${totalTimeSec.toFixed(2)}s`);
   console.log(`Latency p50:    ${p50.toFixed(2)} ms`);
   console.log(`Latency p95:    ${p95.toFixed(2)} ms`);
   console.log(`Latency p99:    ${p99.toFixed(2)} ms`);
   
-  if (dropped > (completed + errors) * 0.05) {
+  if (dropped > (successful + failed) * 0.05) {
     console.log(`\n[WARNING] LOAD_GENERATOR_SATURATED - Node.js event loop could not keep up with MAX_CONCURRENCY (${MAX_CONCURRENCY})`);
   }
 
@@ -136,12 +170,15 @@ async function runTier(targetRPS) {
   const report = {
     timestamp: new Date().toISOString(),
     benchmark_type: "official_sdk",
+    client_type: CLIENT_TYPE,
     target_rps: targetRPS,
     duration_s: totalTimeSec,
     requests: {
-      requested: targetRPS * DURATION_SEC,
-      success: completed,
-      failed: errors,
+      requested: requestedCount,
+      sent: sent,
+      completed: successful + failed,
+      success: successful,
+      failed: failed,
       dropped: dropped
     },
     actual_rps: actualRps,

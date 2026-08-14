@@ -40,7 +40,7 @@ export class MotionMeshClient {
             throw new Error("apiKey is required");
         }
         this.apiKey = options.apiKey;
-        this.baseURL = options.baseURL || "https://api.motionmesh.co.in/v1";
+        this.baseURL = options.baseURL || process.env.MOTIONMESH_BASE_URL || process.env.BASE_URL || "https://api.motionmesh.co.in/v1";
     }
 
     private async request(path: string, options: RequestInit = {}) {
